@@ -1,13 +1,23 @@
 {
   "name": "kaching-tell",
   "version": "1.0.0",
-  "description": "",
+  "description": "Autonomous World Cup goal detector \u2014 detects goals before official confirmation and anchors every detection on Solana",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/index.js",
+    "replay": "node scripts/replay.js",
+    "fund": "node scripts/fund-wallet.js",
+    "balance": "node scripts/check-balance.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "solana",
+    "txline",
+    "world-cup",
+    "sports-data",
+    "autonomous-agent",
+    "blockchain"
+  ],
+  "author": "cutlerjay109-create",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
