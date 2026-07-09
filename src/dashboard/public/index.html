@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kaching-tell</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="header">
+  <h1>kaching-tell</h1>
+  <p class="subtitle">Autonomous World Cup Goal Detector — powered by TxLINE x Solana</p>
+  <div class="tabs">
+    <button class="tab active" id="tab-btn-live" onclick="showTab('live', this)">LIVE</button>
+    <button class="tab" id="tab-btn-demo" onclick="showTab('demo', this)">DEMO / LEDGER</button>
+  </div>
+</div>
+
+<div id="tab-live" class="tab-content">
+  <div class="stats-bar">
+    <div class="stat"><div class="stat-value" id="s-total">-</div><div class="stat-label">DETECTIONS</div></div>
+    <div class="stat"><div class="stat-value" id="s-accuracy">-</div><div class="stat-label">ACCURACY</div></div>
+    <div class="stat"><div class="stat-value" id="s-lead">-</div><div class="stat-label">AVG LEAD</div></div>
+    <div class="stat"><div class="stat-value" id="s-verified">-</div><div class="stat-label">VERIFIED</div></div>
+  </div>
+  <h2>ACTIVE MATCHES</h2>
+  <div id="matches"></div>
+  <h2>RECENT DETECTIONS</h2>
+  <div id="feed"></div>
+</div>
+
+<div id="tab-demo" class="tab-content hidden">
+  <h2>CALIBRATION LEDGER</h2>
+  <p class="empty" style="margin-bottom:16px">All detections from live matches with on-chain proof. Click any transaction to verify on Solana explorer.</p>
+  <div id="ledger"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

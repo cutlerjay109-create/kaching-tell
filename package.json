@@ -1,0 +1,22 @@
+{
+  "name": "kaching-tell",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "axios": "^1.18.1",
+    "bs58": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "eventsource": "^4.1.0",
+    "express": "^5.2.1",
+    "tweetnacl": "^1.0.3"
+  }
+}
