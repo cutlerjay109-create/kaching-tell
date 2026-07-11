@@ -9,7 +9,7 @@
 ![Lead Time](https://img.shields.io/badge/Avg%20Lead-54s-orange)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-**[Live Dashboard](https://YOUR-RAILWAY-URL.up.railway.app)** · **[Demo Video](https://YOUR-VIDEO-URL)** · **[On-Chain Proof](https://solscan.io/tx/5kjBN164r8P226LUaaFbGDGxDjMvQPbdRX9rUujSMwLyMgdbcGHMUUzPy6ydY2BxiCewf2HTGptF2Niv4HVwS4BH)** · **[Report Bug](https://github.com/cutlerjay109-create/kaching-tell/issues)**
+**[Live Dashboard](https://kaching-tell-production.up.railway.app)** · **[Demo Video](https://YOUR-VIDEO-URL)** · **[On-Chain Proof](https://solscan.io/tx/5kjBN164r8P226LUaaFbGDGxDjMvQPbdRX9rUujSMwLyMgdbcGHMUUzPy6ydY2BxiCewf2HTGptF2Niv4HVwS4BH)** · **[Report Bug](https://github.com/cutlerjay109-create/kaching-tell/issues)**
 
 ---
 
