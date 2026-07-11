@@ -43,3 +43,12 @@ h2 { font-size: 13px; color: #666; letter-spacing: 2px; margin-bottom: 12px; mar
 .api-path { color: #9945ff; font-size: 13px; min-width: 140px; }
 .api-desc-inline { color: #666; font-size: 12px; }
 .api-note { color: #444; font-size: 11px; margin-top: 14px; }
+
+.code-block { margin-top: 12px; border: 1px solid #1e1e2e; overflow: hidden; }
+.code-header { display: flex; justify-content: space-between; align-items: center; background: #0d0d1a; padding: 8px 16px; border-bottom: 1px solid #1e1e2e; }
+.code-header span { font-size: 11px; color: #666; letter-spacing: 1px; }
+.copy-btn { background: transparent; border: 1px solid #333; color: #666; padding: 3px 12px; font-size: 10px; cursor: pointer; font-family: inherit; letter-spacing: 1px; }
+.copy-btn:hover { border-color: #14f195; color: #14f195; }
+.copy-btn.copied { border-color: #14f195; color: #14f195; }
+.code-body { background: #070710; color: #a0a0c0; font-size: 11px; padding: 16px; margin: 0; overflow-x: auto; line-height: 1.8; white-space: pre; font-family: 'Courier New', monospace; }
+.inline-code { background: #1a1a2e; color: #9945ff; padding: 1px 6px; font-size: 11px; }

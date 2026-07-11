@@ -37,7 +37,8 @@
 
   <div class="api-box">
     <h2>API ACCESS</h2>
-    <p class="api-desc">kaching-tell exposes a public JSON API. Anyone can pull raw detection data directly into their own app, trading system, or spreadsheet — no login required.</p>
+    <p class="api-desc">kaching-tell exposes a public JSON API. Pull raw detection data directly into any app, trading system, or spreadsheet — no login, no API key required.</p>
+
     <div class="api-endpoint">
       <span class="api-method">GET</span>
       <span class="api-path">/api/live</span>
@@ -53,7 +54,75 @@
       <span class="api-path">/api/matches</span>
       <span class="api-desc-inline">All World Cup fixtures currently being monitored</span>
     </div>
-    <p class="api-note">All responses are JSON. No API key required. Data updates every 10 seconds.</p>
+
+    <h2 style="margin-top:24px">INTEGRATE IN 10 LINES</h2>
+    <p class="api-desc">Poll <code class="inline-code">/api/live</code> every 5 seconds to receive goal alerts the moment they are detected — before official confirmation arrives.</p>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span>JavaScript</span>
+        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      </div>
+      <pre class="code-body">// Receive goal alerts in real time
+const BASE = 'https://YOUR-RAILWAY-URL';
+
+setInterval(async () => {
+  const res  = await fetch(BASE + '/api/live');
+  const data = await res.json();
+
+  data.recent.forEach(detection => {
+    if (detection.status === 'pending' || detection.status === 'verified') {
+      console.log('GOAL — ' + detection.scoringTeam);
+      console.log('Match: ' + detection.matchName);
+      console.log('Score: ' + detection.scoreAtDetection);
+      console.log('Clock: ' + detection.matchClockFormatted);
+      console.log('Confidence: ' + detection.confidence);
+      console.log('Lead time: ' + (detection.leadTimeMs
+        ? Math.round(detection.leadTimeMs / 1000) + 's before official'
+        : 'pending confirmation'));
+      console.log('Proof: https://solscan.io/tx/' + detection.txSig);
+    }
+  });
+}, 5000);</pre>
+    </div>
+
+    <h2 style="margin-top:24px">EXAMPLE RESPONSE</h2>
+    <div class="code-block">
+      <div class="code-header">
+        <span>JSON — /api/live</span>
+        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      </div>
+      <pre class="code-body">{
+  "stats": {
+    "total": 3,
+    "verified": 3,
+    "accuracy": "100.0",
+    "avgLead": 54
+  },
+  "recent": [
+    {
+      "matchName": "Norway vs England",
+      "scoringTeam": "Norway",
+      "scoreAtDetection": "1 - 0",
+      "matchClockFormatted": "23:14",
+      "goalType": "Shot",
+      "confidence": "HIGH",
+      "spikeMagnitude": 11240,
+      "spikeRatio": "18.50",
+      "marketType": "OVERUNDER_PARTICIPANT_GOALS",
+      "status": "verified",
+      "leadTimeMs": 54000,
+      "txSig": "3xKp9m...7qBn"
+    }
+  ],
+  "matches": [
+    { "Participant1": "Norway", "Participant2": "England" },
+    { "Participant1": "Argentina", "Participant2": "Switzerland" }
+  ]
+}</pre>
+    </div>
+
+    <p class="api-note">All responses JSON. No authentication required. Detections include Solana transaction signatures verifiable at solscan.io.</p>
   </div>
 </div>
 

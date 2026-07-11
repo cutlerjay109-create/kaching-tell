@@ -83,3 +83,12 @@ async function loadLedger() {
 
 loadLive();
 setInterval(loadLive, 5000);
+
+function copyCode(btn) {
+  const code = btn.closest('.code-block').querySelector('.code-body').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
