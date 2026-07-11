@@ -29,10 +29,32 @@
   <div id="feed"></div>
 </div>
 
+
 <div id="tab-demo" class="tab-content hidden">
   <h2>CALIBRATION LEDGER</h2>
   <p class="empty" style="margin-bottom:16px">All detections from live matches with on-chain proof. Click any transaction to verify on Solana explorer.</p>
   <div id="ledger"></div>
+
+  <div class="api-box">
+    <h2>API ACCESS</h2>
+    <p class="api-desc">kaching-tell exposes a public JSON API. Anyone can pull raw detection data directly into their own app, trading system, or spreadsheet — no login required.</p>
+    <div class="api-endpoint">
+      <span class="api-method">GET</span>
+      <span class="api-path">/api/live</span>
+      <span class="api-desc-inline">Current stats, active matches, last 5 detections</span>
+    </div>
+    <div class="api-endpoint">
+      <span class="api-method">GET</span>
+      <span class="api-path">/api/ledger</span>
+      <span class="api-desc-inline">Full detection history with Solana proof for every entry</span>
+    </div>
+    <div class="api-endpoint">
+      <span class="api-method">GET</span>
+      <span class="api-path">/api/matches</span>
+      <span class="api-desc-inline">All World Cup fixtures currently being monitored</span>
+    </div>
+    <p class="api-note">All responses are JSON. No API key required. Data updates every 10 seconds.</p>
+  </div>
 </div>
 
 <script src="app.js"></script>

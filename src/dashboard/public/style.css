@@ -33,3 +33,13 @@ h2 { font-size: 13px; color: #666; letter-spacing: 2px; margin-bottom: 12px; mar
 .empty { color: #444; font-size: 13px; padding: 16px 0; }
 
 .det-score { font-size: 16px; color: #ffffff; font-weight: bold; margin: 6px 0 4px 0; }
+
+.api-box { background: #0d0d1a; border: 1px solid #14f19533; padding: 20px 24px; margin-top: 32px; }
+.api-box h2 { color: #14f195; margin-bottom: 8px; }
+.api-desc { color: #666; font-size: 12px; margin-bottom: 16px; line-height: 1.7; }
+.api-endpoint { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #1a1a2e; flex-wrap: wrap; }
+.api-endpoint:last-of-type { border-bottom: none; }
+.api-method { background: #14f19522; color: #14f195; padding: 3px 10px; font-size: 11px; letter-spacing: 1px; min-width: 40px; text-align: center; }
+.api-path { color: #9945ff; font-size: 13px; min-width: 140px; }
+.api-desc-inline { color: #666; font-size: 12px; }
+.api-note { color: #444; font-size: 11px; margin-top: 14px; }
