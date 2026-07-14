@@ -1,7 +1,6 @@
+require('dotenv').config();
+const { EventSource } = require('eventsource');
 const { fetchActiveFixtures } = require('./fixturePoller');
-const { fetchScoreSlot, getCurrentSlot } = require('./scoreStream');
-const { fetchOddsSlot } = require('./oddsStream');
-const { POLL_INTERVAL } = require('../config/constants');
 const logger = require('../utils/logger');
 
 class StreamManager {
@@ -10,10 +9,11 @@ class StreamManager {
     this.onOdds = onOdds;
     this.fixtures = [];
     this.fixtureIds = new Set();
+    this.scoreSource = null;
+    this.oddsSource = null;
+    this.running = false;
     this.seenScores = new Set();
     this.seenOdds = new Set();
-    this.timer = null;
-    this.running = false;
   }
 
   async start() {
@@ -23,46 +23,102 @@ class StreamManager {
       return [];
     }
     this.fixtures.forEach(f => this.fixtureIds.add(f.FixtureId));
-    logger.info('streamManager', 'Monitoring ' + this.fixtures.length + ' fixtures');
+    logger.info('streamManager', 'Connecting to SSE streams for ' + this.fixtures.length + ' fixtures');
     this.running = true;
-    this._poll();
-    this.timer = setInterval(() => this._poll(), POLL_INTERVAL);
+    this._connectScores();
+    this._connectOdds();
     return this.fixtures;
+  }
+
+  _connectScores() {
+    if (!this.running) return;
+    const url = process.env.TXLINE_API_ORIGIN + '/api/scores/stream';
+    logger.info('streamManager', 'Connecting to scores SSE stream');
+
+    this.scoreSource = new EventSource(url, {
+      fetch: (input, init) => fetch(input, {
+        ...init,
+        headers: {
+          ...init.headers,
+          'Authorization': 'Bearer ' + process.env.TXLINE_JWT,
+          'X-Api-Token': process.env.TXLINE_API_TOKEN,
+        }
+      })
+    });
+
+    this.scoreSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (!data.FixtureId) return;
+        if (!this.fixtureIds.has(data.FixtureId)) return;
+
+        const key = data.FixtureId + ':' + data.Seq + ':' + data.Ts;
+        if (this.seenScores.has(key)) return;
+        this.seenScores.add(key);
+
+        this.onScore(data);
+      } catch(e) {}
+    };
+
+    this.scoreSource.onerror = (err) => {
+      logger.warn('streamManager', 'Scores SSE error', { status: err.status, message: err.message, type: err.type });
+      this.scoreSource.close();
+      setTimeout(() => { if (this.running) this._connectScores(); }, 5000);
+    };
+
+    this.scoreSource.addEventListener('heartbeat', (e) => {
+      logger.debug('streamManager', 'Score stream heartbeat');
+    });
+  }
+
+  _connectOdds() {
+    if (!this.running) return;
+    const url = process.env.TXLINE_API_ORIGIN + '/api/odds/stream';
+    logger.info('streamManager', 'Connecting to odds SSE stream');
+
+    this.oddsSource = new EventSource(url, {
+      fetch: (input, init) => fetch(input, {
+        ...init,
+        headers: {
+          ...init.headers,
+          'Authorization': 'Bearer ' + process.env.TXLINE_JWT,
+          'X-Api-Token': process.env.TXLINE_API_TOKEN,
+        }
+      })
+    });
+
+    this.oddsSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (!data.FixtureId) return;
+        if (!this.fixtureIds.has(data.FixtureId)) return;
+        if (!data.InRunning) return;
+        if (!data.Prices || data.Prices.length === 0) return;
+
+        const key = data.FixtureId + ':' + data.MessageId;
+        if (this.seenOdds.has(key)) return;
+        this.seenOdds.add(key);
+
+        this.onOdds(data);
+      } catch(e) {}
+    };
+
+    this.oddsSource.onerror = (err) => {
+      logger.warn('streamManager', 'Odds SSE error', { status: err.status, message: err.message, type: err.type });
+      this.oddsSource.close();
+      setTimeout(() => { if (this.running) this._connectOdds(); }, 5000);
+    };
+
+    this.oddsSource.addEventListener('heartbeat', (e) => {
+      logger.debug('streamManager', 'Odds stream heartbeat');
+    });
   }
 
   stop() {
     this.running = false;
-    if (this.timer) clearInterval(this.timer);
-    logger.info('streamManager', 'Stopped');
-  }
-
-  async _poll() {
-    if (!this.running) return;
-    const slot = getCurrentSlot();
-    const [scores, odds] = await Promise.all([
-      fetchScoreSlot(slot.epochDay, slot.hourOfDay, slot.interval),
-      fetchOddsSlot(slot.epochDay, slot.hourOfDay, slot.interval)
-    ]);
-
-    scores
-      .filter(s => this.fixtureIds.has(s.FixtureId))
-      .forEach(s => {
-        const key = s.FixtureId + ':' + s.Seq + ':' + s.Ts;
-        if (!this.seenScores.has(key)) {
-          this.seenScores.add(key);
-          this.onScore(s);
-        }
-      });
-
-    odds
-      .filter(o => this.fixtureIds.has(o.FixtureId) && o.InRunning && o.Prices && o.Prices.length > 0)
-      .forEach(o => {
-        const key = o.FixtureId + ':' + o.MessageId;
-        if (!this.seenOdds.has(key)) {
-          this.seenOdds.add(key);
-          this.onOdds(o);
-        }
-      });
+    if (this.scoreSource) this.scoreSource.close();
+    if (this.oddsSource) this.oddsSource.close();
+    logger.info('streamManager', 'SSE streams closed');
   }
 
   getFixtures() { return this.fixtures; }
