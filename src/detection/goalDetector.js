@@ -110,9 +110,18 @@ class GoalDetector extends EventEmitter {
   }
 
   _tryConfirm() {
-    if (!this.pendingGoalAction || !this.lastSpike) return;
-    const timeBetween = Math.abs(this.pendingGoalAction.receivedAt - this.lastSpike.ts);
-    if (timeBetween > GOAL_WINDOW) return;
+    if (!this.pendingGoalAction) return;
+
+    // If we have an odds spike within window — HIGH/MEDIUM confidence
+    // If no odds spike — still fire with LOW confidence after 5 seconds
+    const hasSpike = this.lastSpike && Math.abs(this.pendingGoalAction.receivedAt - this.lastSpike.ts) <= GOAL_WINDOW;
+    const waitedLongEnough = (Date.now() - this.pendingGoalAction.receivedAt) >= 5000;
+
+    if (!hasSpike && !waitedLongEnough) {
+      // Wait up to 5 seconds for an odds spike to confirm
+      setTimeout(() => this._tryConfirm(), 5000);
+      return;
+    }
 
     const pa = this.pendingGoalAction;
     const event = pa.event;
@@ -146,11 +155,11 @@ class GoalDetector extends EventEmitter {
       awayGoals: awayScore,
       wallTs: Date.now(),
       eventTs: pa.eventTs,
-      spikeMagnitude: this.lastSpike.spike.magnitude,
-      spikeRatio: this.lastSpike.spike.ratio,
-      baseline: this.lastSpike.spike.baseline,
-      marketType: this.lastSpike.marketType,
-      confidence: this._confidence(this.lastSpike.spike),
+      spikeMagnitude: this.lastSpike ? this.lastSpike.spike.magnitude : 0,
+      spikeRatio: this.lastSpike ? this.lastSpike.spike.ratio : '0.00',
+      baseline: this.lastSpike ? this.lastSpike.spike.baseline : 0,
+      marketType: this.lastSpike ? this.lastSpike.marketType : 'SCORE_ONLY',
+      confidence: this._confidence(this.lastSpike ? this.lastSpike.spike : null),
       currentStats: event.Stats || {},
       fpReason,
       status: 'pending'
@@ -172,6 +181,7 @@ class GoalDetector extends EventEmitter {
   }
 
   _confidence(spike) {
+    if (!spike) return 'LOW';
     if (spike.ratio >= 10 && spike.magnitude >= 5000) return 'HIGH';
     if (spike.ratio >= 5  && spike.magnitude >= 2000) return 'MEDIUM';
     return 'LOW';

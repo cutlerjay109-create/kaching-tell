@@ -54,6 +54,11 @@ class StreamManager {
     this.fixtures.forEach(f => this.fixtureIds.add(f.FixtureId));
     logger.info('streamManager', 'Monitoring ' + this.fixtures.length + ' fixtures', { ids: [...this.fixtureIds] });
     this.running = true;
+
+    // Wait 2 seconds after fixtures loaded before connecting SSE
+    // This ensures fixtureIds is fully populated before any events arrive
+    await new Promise(r => setTimeout(r, 2000));
+
     this._connectScores();
     this._connectOdds();
     this._startPolling();
@@ -78,17 +83,19 @@ class StreamManager {
     const url = process.env.TXLINE_API_ORIGIN + '/api/scores/stream';
     logger.info('streamManager', 'Connecting scores SSE');
     this.scoreSource = new EventSource(url, this._sseOptions());
-    this.scoreSource.onmessage = (e) => {
+    const processScore = (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const raw = e.data || e;
+        const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!data.FixtureId || !this.fixtureIds.has(data.FixtureId)) return;
         const key = data.FixtureId + ':' + data.Seq + ':' + data.Ts;
         if (this.seenScores.has(key)) return;
         this.seenScores.add(key);
         logger.info('streamManager', 'SSE score event', { fixtureId: data.FixtureId, action: data.Action });
         this.onScore(data);
-      } catch(e) {}
+      } catch(err) { logger.error('streamManager', 'Score parse error', { err: err.message }); }
     };
+    this.scoreSource.onmessage = processScore;
     this.scoreSource.onerror = () => {
       logger.warn('streamManager', 'Scores SSE error — reconnecting in 5s');
       this.scoreSource.close();
@@ -104,17 +111,20 @@ class StreamManager {
     const url = process.env.TXLINE_API_ORIGIN + '/api/odds/stream';
     logger.info('streamManager', 'Connecting odds SSE');
     this.oddsSource = new EventSource(url, this._sseOptions());
-    this.oddsSource.onmessage = (e) => {
+    const processOdds = (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const raw = e.data || e;
+        const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!data.FixtureId || !this.fixtureIds.has(data.FixtureId)) return;
         if (!data.InRunning || !data.Prices || !data.Prices.length) return;
         const key = data.FixtureId + ':' + data.MessageId;
         if (this.seenOdds.has(key)) return;
         this.seenOdds.add(key);
+        logger.info('streamManager', 'SSE odds event', { fixtureId: data.FixtureId, type: data.SuperOddsType, price: data.Prices[0] });
         this.onOdds(data);
-      } catch(e) {}
+      } catch(err) { logger.error('streamManager', 'Odds parse error', { err: err.message }); }
     };
+    this.oddsSource.onmessage = processOdds;
     this.oddsSource.onerror = () => {
       logger.warn('streamManager', 'Odds SSE error — reconnecting in 5s');
       this.oddsSource.close();
