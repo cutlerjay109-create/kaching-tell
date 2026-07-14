@@ -49,7 +49,11 @@ class StreamManager {
     this.scoreSource.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (!data.FixtureId) return;
+        if (!data.FixtureId) {
+          logger.debug('streamManager', 'Score event no FixtureId', { raw: e.data.substring(0,100) });
+          return;
+        }
+        logger.info('streamManager', 'Score event received', { fixtureId: data.FixtureId, action: data.Action, inSet: this.fixtureIds.has(data.FixtureId) });
         if (!this.fixtureIds.has(data.FixtureId)) return;
 
         const key = data.FixtureId + ':' + data.Seq + ':' + data.Ts;
@@ -57,7 +61,7 @@ class StreamManager {
         this.seenScores.add(key);
 
         this.onScore(data);
-      } catch(e) {}
+      } catch(e) { logger.error('streamManager', 'Score parse error', { err: e.message }); }
     };
 
     this.scoreSource.onerror = (err) => {
@@ -91,6 +95,7 @@ class StreamManager {
       try {
         const data = JSON.parse(e.data);
         if (!data.FixtureId) return;
+        logger.info('streamManager', 'Odds event received', { fixtureId: data.FixtureId, inRunning: data.InRunning, inSet: this.fixtureIds.has(data.FixtureId) });
         if (!this.fixtureIds.has(data.FixtureId)) return;
         if (!data.InRunning) return;
         if (!data.Prices || data.Prices.length === 0) return;
@@ -100,7 +105,7 @@ class StreamManager {
         this.seenOdds.add(key);
 
         this.onOdds(data);
-      } catch(e) {}
+      } catch(e) { logger.error('streamManager', 'Odds parse error', { err: e.message }); }
     };
 
     this.oddsSource.onerror = (err) => {
