@@ -1,44 +1,42 @@
 {
-  "updatedAt": "2026-07-14T20:49:35.324Z",
+  "updatedAt": "2026-07-14T20:55:09.234Z",
   "stats": {
     "total": 1,
     "verified": 1,
     "fp": 0,
     "pending": 0,
-    "avgLead": 103,
+    "avgLead": 44,
     "accuracy": "100.0"
   },
   "detections": [
     {
-      "fixtureId": 18237038,
-      "matchName": "France vs Spain",
-      "participant1": "France",
-      "participant2": "Spain",
-      "scoringTeam": "Spain",
-      "isHomeGoal": false,
+      "fixtureId": 17926687,
+      "matchName": "WC Group Stage — Fixture 17926687",
+      "participant1": "Home Side",
+      "participant2": "Away Side",
+      "scoringTeam": "Home Side",
+      "isHomeGoal": true,
       "goalType": "Shot",
-      "matchClock": 3455,
-      "matchClockFormatted": "57:35",
-      "scoreAtDetection": "0 - 1",
-      "homeGoals": 0,
-      "awayGoals": 1,
-      "wallTs": 1784060376027,
-      "eventTs": 1784060376027,
-      "spikeMagnitude": 0,
-      "spikeRatio": "0.00",
-      "baseline": 0,
-      "marketType": "SCORE_ONLY",
-      "confidence": "LOW",
+      "matchClock": 2815,
+      "matchClockFormatted": "46:55",
+      "scoreAtDetection": "3 - 0",
+      "homeGoals": 3,
+      "awayGoals": 0,
+      "wallTs": 1783613609337,
+      "eventTs": 1781978962358,
+      "spikeMagnitude": 14387,
+      "spikeRatio": "22.90",
+      "baseline": 628,
+      "marketType": "OVERUNDER_PARTICIPANT_GOALS",
+      "confidence": "HIGH",
       "currentStats": {
-        "1": 0,
-        "1001": 0,
-        "1002": 1
+        "1": 3,
+        "1001": 3,
+        "1002": 0
       },
       "status": "verified",
-      "leadTimeMs": 103000,
-      "fpReason": null,
-      "txSig": "71zS8H2SsoxAhASez3MRAQjmWGdnx1VnfvD4s9R9365FQHc5sLdbCwsXLt3rU1EotRh8nktp7jqgq3w2Lr263cL",
-      "hash": "911633a5c591d8b627e5fe20f1e037079bc87d463a72b274533e814c8d425bc3"
+      "leadTimeMs": 44000,
+      "txSig": "4pBqrwxrMPFnCdzmDqrSD6TMtF2RuX1LHP8bTr31pXMonGnFTDijXf7wbNtSVTCG39y9PUXS8nRU2428VadUwrUa"
     }
   ]
 }
