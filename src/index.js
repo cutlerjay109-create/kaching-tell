@@ -44,10 +44,10 @@ async function main() {
 
     detector.on('detection', async (detection) => {
       store.addDetection(detection);
+      verifier.watch(detection);
       const hash = hashDetection(detection);
       const sig = await anchorDetection(detection, hash);
       store.updateDetection(detection.wallTs, detection.fixtureId, { txSig: sig, hash });
-      verifier.watch(detection);
       writeLedger(store);
     });
 
