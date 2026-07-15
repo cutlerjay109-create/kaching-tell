@@ -52,3 +52,5 @@ h2 { font-size: 13px; color: #666; letter-spacing: 2px; margin-bottom: 12px; mar
 .copy-btn.copied { border-color: #14f195; color: #14f195; }
 .code-body { background: #070710; color: #a0a0c0; font-size: 11px; padding: 16px; margin: 0; overflow-x: auto; line-height: 1.8; white-space: pre; font-family: 'Courier New', monospace; }
 .inline-code { background: #1a1a2e; color: #9945ff; padding: 1px 6px; font-size: 11px; }
+.validation-note { background: #0d0d1a; border: 1px solid #9945ff33; border-left: 3px solid #9945ff; padding: 12px 16px; margin-bottom: 16px; font-size: 11px; color: #666; line-height: 1.8; }
+.vnote-title { display: block; color: #9945ff; font-size: 11px; letter-spacing: 1px; margin-bottom: 6px; }

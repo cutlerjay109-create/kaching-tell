@@ -32,7 +32,11 @@
 
 <div id="tab-demo" class="tab-content hidden">
   <h2>CALIBRATION LEDGER</h2>
-  <p class="empty" style="margin-bottom:16px">All detections from live matches with on-chain proof. Click any transaction to verify on Solana explorer.</p>
+  <p class="empty" style="margin-bottom:8px">All detections with on-chain proof. Click any transaction to verify on Solana explorer.</p>
+  <div class="validation-note">
+    <span class="vnote-title">About Pipeline Validation entries</span>
+    Detections marked <strong>(Pipeline Validation)</strong> were produced by replaying real World Cup match data through the live detection pipeline — including real Solana mainnet anchoring. They prove every component works correctly with real data. Detections without this label were caught live by the autonomous agent during actual matches.
+  </div>
   <div id="ledger"></div>
 
   <div class="api-box">
