@@ -137,7 +137,7 @@ class StreamManager {
   }
 
   _startPolling() {
-    logger.info('streamManager', 'Starting backup polling every 30s');
+    logger.info('streamManager', 'Starting backup polling every 10s');
     this.pollTimer = setInterval(() => this._poll(), POLL_INTERVAL);
     this._poll();
   }
