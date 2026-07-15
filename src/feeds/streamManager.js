@@ -2,6 +2,7 @@ require('dotenv').config();
 const { EventSource } = require('eventsource');
 const axios = require('axios');
 const { fetchActiveFixtures } = require('./fixturePoller');
+const { POLL_INTERVAL } = require('../config/constants');
 const logger = require('../utils/logger');
 
 const client = axios.create({
@@ -137,7 +138,7 @@ class StreamManager {
 
   _startPolling() {
     logger.info('streamManager', 'Starting backup polling every 30s');
-    this.pollTimer = setInterval(() => this._poll(), 30000);
+    this.pollTimer = setInterval(() => this._poll(), POLL_INTERVAL);
     this._poll();
   }
 
