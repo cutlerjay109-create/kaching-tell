@@ -116,11 +116,11 @@ His job is trading football markets in real time. When a goal is scored the odds
 He opens kaching-tell and sees:
 
 ```
-GOAL DETECTED - France vs Spain
-Score: 0 - 1 | Clock: 57:35 | Confidence: HIGH
+GOAL DETECTED - WC Group Stage Match
+Score: 3 - 0 | Clock: 46:55 | Confidence: HIGH
 Spike: 14,387 | Ratio: 22.9x baseline | Market: Over/Under
-54 seconds before official confirmation
-Solana proof: gZTbMHLk...BqPgdp
+44 seconds before official confirmation
+Solana proof: 4pBqrwxr...wrUa
 ```
 
 He clicks the Solana link. The transaction timestamp shows the detection was written before the official stat updated. The proof cannot be faked retroactively. He now has a verified, auditable performance record he can evaluate before integrating kaching-tell into his trading infrastructure.
