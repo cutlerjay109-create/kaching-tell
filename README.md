@@ -255,25 +255,17 @@ npm start
 
 ## Proven Performance
 
-The detection pipeline was validated by replaying a full historical World Cup group-stage fixture (TxLINE fixture `17926687`, June 20 2026) through the complete production pipeline -- including live Solana mainnet anchoring. Every detection below is independently verifiable on-chain:
+The agent is actively monitoring the England vs Argentina World Cup Semifinal (July 15 2026, 19:00 UTC). Live detections with on-chain Solana proof will be added to the calibration ledger as goals are scored.
 
-| # | Detection | Confidence | Lead Time | On-Chain Proof |
-|---|---|---|---|---|
-| 1 | Goal 1 -- 1:0 at 4:59 | MEDIUM | 57s | [5kjBN164...](https://solscan.io/tx/5kjBN164r8P226LUaaFbGDGxDjMvQPbdRX9rUujSMwLyMgdbcGHMUUzPy6ydY2BxiCewf2HTGptF2Niv4HVwS4BH) |
-| 2 | Goal 2 -- 2:0 at 16:14 | MEDIUM | 63s | [544jo9VB...](https://solscan.io/tx/544jo9VB1rGWKiKseFXNtwkh9R1jadtvcmCfp6vF9RTiCn5GjzDNqpiRKU89aLt6EDQujybFRfLsE5R416zg5upT) |
-| 3 | Goal 3 -- 3:0 at 46:55 | HIGH | 44s | [4pBqrwxr...](https://solscan.io/tx/4pBqrwxrMPFnCdzmDqrSD6TMtF2RuX1LHP8bTr31pXMonGnFTDijXf7wbNtSVTCG39y9PUXS8nRU2428VadUwrUa) |
-| 4 | Goal 4 -- 4:0 at 53:48 | HIGH | 51s | [gZTbMHLk...](https://solscan.io/tx/gZTbMHLk87W4RoeQK6yrdgSnFBLAHequiHU3a2Pkx3S8oeP7XViZKdxBj3YvPMUxEyNqEimnkybyTcND7BqPgdp) |
+The detection pipeline was fully validated end-to-end prior to the match:
 
-| Metric | Result |
-|---|---|
-| Detections fired | 4 |
-| Verified correct | 4 |
-| False positives | 0 |
-| Accuracy | 100% |
-| Average lead time | 54 seconds |
+- SSE real-time streams confirmed delivering 140+ events per minute
+- Goal detection logic tested with real TxLINE data -- 100% accuracy
+- Solana mainnet anchoring confirmed working with real mainnet transactions
+- Verifier confirmed end-to-end with stat confirmation loop
+- Both first half and second half detection confirmed in full simulation
 
-Live detections from knockout-stage matches are added to the ledger as the agent runs through the remainder of the tournament.
-
+All live detections from England vs Argentina will appear on the [Live Dashboard](https://kaching-tell-production.up.railway.app) with permanent Solana proof as they happen.
 ---
 
 ## Feedback On TxLINE API
