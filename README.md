@@ -44,7 +44,6 @@ That gap is what kaching-tell was built to close.
 
 kaching-tell is a fully autonomous agent that watches every World Cup match simultaneously. It ingests two live TxLINE data streams per match — the **score feed** and the **odds feed** — and detects goals by finding the moment both streams react at the same time.
 
-![kaching-tell dashboard](docs/dashboard.png)
 
 When a goal happens:
 
