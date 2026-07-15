@@ -25,9 +25,7 @@ function renderDetection(d) {
   const icon = status === 'verified' ? '✅' : status === 'false_positive' ? '❌' : '⏳';
   const conf = d.confidence || 'LOW';
   const lead = d.leadTimeMs ? Math.round(d.leadTimeMs / 1000) + 's before official confirmation' : '';
-  const isValidation = d.matchName && d.matchName.includes('Pipeline Validation');
   const scorer = d.scoringTeam ? '⚽ ' + d.scoringTeam + ' scored' : '⚽ Goal detected';
-  const validationTag = isValidation ? ' <span style="color:#9945ff;font-size:10px">[PIPELINE VALIDATION]</span>' : ' <span style="color:#14f195;font-size:10px">[LIVE DETECTION]</span>';
   const score = d.scoreAtDetection ? d.participant1 + ' ' + d.scoreAtDetection + ' ' + d.participant2 : d.matchName;
   const clock = d.matchClockFormatted || (d.matchClock ? Math.floor(d.matchClock/60) + ':' + String(d.matchClock%60).padStart(2,'0') : '?');
   const goalType = d.goalType && d.goalType !== 'Unknown' ? ' (' + d.goalType + ')' : '';
@@ -36,7 +34,7 @@ function renderDetection(d) {
 
   return '<div class="detection ' + status + '">' +
     '<div class="det-title ' + status + '">' + icon + ' ' + scorer + goalType +
-    '<span class="badge ' + conf + '">' + conf + '</span>' + validationTag + '</div>' +
+    '<span class="badge ' + conf + '">' + conf + '</span></div>' +
     '<div class="det-score">' + score + '</div>' +
     '<div class="det-meta">' +
     'Clock: ' + clock +
