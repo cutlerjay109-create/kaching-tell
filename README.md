@@ -11,7 +11,25 @@
 
 **[Live Dashboard](https://kaching-tell-production.up.railway.app)** · **[Demo Video](https://YOUR-VIDEO-URL)** · **[On-Chain Proof](https://solscan.io/tx/5kjBN164r8P226LUaaFbGDGxDjMvQPbdRX9rUujSMwLyMgdbcGHMUUzPy6ydY2BxiCewf2HTGptF2Niv4HVwS4BH)** · **[Report Bug](https://github.com/cutlerjay109-create/kaching-tell/issues)**
 
+
+## Important Note On Live Detections
+
+During the World Cup knockout stage matches used for testing and demonstration, the agent encountered a critical configuration issue that prevented live goal detections from being captured and verified on-chain.
+
+**The Issue:** The clock sanity filter was set to 300 seconds (5 minutes). Real football matches have a 15-minute halftime break plus stoppage time, creating a natural drift between wall clock and match clock that exceeded this limit. Every second-half goal event was silently discarded before reaching the detector.
+
+**The Impact:** Goals were detected by TxLINE's SSE stream and received by the agent, but rejected before the detection pipeline could process them. No verified on-chain detections were captured during live matches.
+
+**The Fix:** The clock sanity limit has been increased to 5400 seconds (90 minutes), covering halftime, stoppage time, and extra time. Additionally:
+- The verifier now confirms goals from ANY stat key increment (total, home, or away) — not requiring all three simultaneously
+- Score tracking updates from every SSE event and never goes backwards
+- The 120-second cooldown prevents duplicate detections per goal
+- All fixes are committed, tested end-to-end, and deployed to Railway
+
+**Verified Working:** A full end-to-end test confirmed the complete pipeline — detection, Solana mainnet anchoring, and stat verification — works correctly on both first and second half events. The agent is production ready for any future matches.
+
 ---
+
 
 ## Contents
 
