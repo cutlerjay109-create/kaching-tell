@@ -267,7 +267,7 @@ The detection pipeline was validated end-to-end through extensive live testing:
 - Clock sanity filter allows up to 90 minutes drift — covers halftime and stoppage time
 - Score tracking updates from every SSE event and never goes backwards
 
-All live detections appear on the [Live Dashboard](https://kaching-tell-production.up.railway.app) with permanent Solana proof.
+
 ---
 
 ## Feedback On TxLINE API
