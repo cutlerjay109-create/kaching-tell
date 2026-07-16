@@ -40,14 +40,13 @@ class GoalDetector extends EventEmitter {
       return;
     }
 
-    // Update running score from stats
+    // Update running score from ALL score events — never go backwards
     if (event.Stats && Object.keys(event.Stats).length > 0) {
       const p1Goals = event.Stats['1001'] || 0;
       const p2Goals = event.Stats['1002'] || 0;
-      if (p1Goals !== this.homeGoals || p2Goals !== this.awayGoals) {
-        this.homeGoals = p1Goals;
-        this.awayGoals = p2Goals;
-      }
+      // Only update if higher than current (prevents corrupted data going backwards)
+      if (p1Goals > this.homeGoals) this.homeGoals = p1Goals;
+      if (p2Goals > this.awayGoals) this.awayGoals = p2Goals;
     }
 
     if (event.Action === 'goal') {

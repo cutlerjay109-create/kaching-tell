@@ -24,31 +24,10 @@ const client = axios.create({
 });
 
 async function fetchCurrentScore(fixtureId) {
-  try {
-    const now = new Date();
-    const day = Math.floor(Date.now() / 86400000);
-    const hour = now.getUTCHours();
-    const allEvents = [];
-    for (const h of [hour-1, hour]) {
-      for (const i of [0,1,2,3,4,5]) {
-        try {
-          const res = await client.get('/api/scores/updates/' + day + '/' + h + '/' + i);
-          allEvents.push(...res.data.filter(s => s.FixtureId === fixtureId));
-        } catch(e) {}
-      }
-    }
-    allEvents.sort((a,b) => a.Ts - b.Ts);
-    const latest = allEvents[allEvents.length - 1];
-    if (latest && latest.Stats) {
-      const homeGoals = latest.Stats['1001'] || 0;
-      const awayGoals = latest.Stats['1002'] || 0;
-      const totalGoals = latest.Stats['1'] || 0;
-      logger.info('main', 'Current score fetched', { fixtureId, homeGoals, awayGoals, totalGoals });
-      return { homeGoals, awayGoals, totalGoals };
-    }
-  } catch(e) {
-    logger.warn('main', 'Could not fetch current score', { err: e.message });
-  }
+  // TxLINE batch endpoint has corrupted stats in second half
+  // Score is tracked live from SSE events instead
+  // Start from 0 and let live events update naturally
+  logger.info('main', 'Score will be tracked from live SSE events', { fixtureId });
   return { homeGoals: 0, awayGoals: 0, totalGoals: 0 };
 }
 
