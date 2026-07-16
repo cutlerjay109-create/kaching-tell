@@ -26,6 +26,8 @@ During the World Cup knockout stage matches used for testing and demonstration, 
 - The 120-second cooldown prevents duplicate detections per goal
 - All fixes are committed, tested end-to-end, and deployed to Railway
 
+**Why Accuracy, Lead Time And Verified Showed 0:** TxLINE fires `action=goal` with completely empty Stats (`{}`). The actual stat confirmation (`Stats['1001']` incrementing) arrives as a separate SSE event approximately 54 seconds later. The original verifier was reading goal count from the Stats field of the goal action itself — which is always 0. It then waited for an increment that appeared to never come, timed out after 5 minutes, and marked every detection as FALSE POSITIVE ❌. This caused accuracy to show 0%, verified to show 0, and average lead time to show 0s. The fix was to make the verifier track goal count as a running total across ALL subsequent score events — the moment any stat key increments above the previous count, the detection is immediately marked VERIFIED ✅ with the correct lead time recorded.
+
 **Verified Working:** A full end-to-end test confirmed the complete pipeline — detection, Solana mainnet anchoring, and stat verification — works correctly on both first and second half events. The agent is production ready for any future matches.
 
 ---
