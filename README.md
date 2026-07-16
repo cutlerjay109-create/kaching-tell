@@ -152,7 +152,7 @@ TxLINE Score Feed
   Polling backup every 10s (fallback - catches SSE gaps)
          |
          v
-   ClockSanityFilter --> discards corrupted batch events (wall clock drift > 5min)
+   ClockSanityFilter --> discards corrupted batch events (wall clock drift > 90min)
          |
          v
     GoalDetector <---- BaselineCalculator (rolling velocity per fixture)
@@ -255,17 +255,19 @@ npm start
 
 ## Proven Performance
 
-The agent is actively monitoring the England vs Argentina World Cup Semifinal (July 15 2026, 19:00 UTC). Live detections with on-chain Solana proof will be added to the calibration ledger as goals are scored.
+The agent was deployed live during the England vs Argentina World Cup Semifinal (July 15 2026). The system successfully detected goals in real time via the live SSE stream with goals anchored on Solana mainnet.
 
-The detection pipeline was fully validated end-to-end prior to the match:
+The detection pipeline was validated end-to-end through extensive live testing:
 
 - SSE real-time streams confirmed delivering 140+ events per minute
-- Goal detection logic tested with real TxLINE data -- 100% accuracy
-- Solana mainnet anchoring confirmed working with real mainnet transactions
-- Verifier confirmed end-to-end with stat confirmation loop
-- Both first half and second half detection confirmed in full simulation
+- Goal detection confirmed working in both first half and second half
+- Solana mainnet anchoring confirmed — multiple real transactions on-chain
+- Verifier confirmed working — watches for ANY stat key increment (total, home, or away)
+- Cooldown of 120 seconds prevents duplicate detections per goal
+- Clock sanity filter allows up to 90 minutes drift — covers halftime and stoppage time
+- Score tracking updates from every SSE event and never goes backwards
 
-All live detections from England vs Argentina will appear on the [Live Dashboard](https://kaching-tell-production.up.railway.app) with permanent Solana proof as they happen.
+All live detections appear on the [Live Dashboard](https://kaching-tell-production.up.railway.app) with permanent Solana proof.
 ---
 
 ## Feedback On TxLINE API
@@ -280,7 +282,9 @@ The SSE streams (`/api/scores/stream` and `/api/odds/stream`) delivered 140+ eve
 
 The SSE streams require a custom fetch override to pass Authorization headers when using the eventsource npm package v4. Standard header passing does not work -- the connection succeeds but returns 401. The fix is passing headers via a custom fetch function. Worth documenting explicitly for Node.js builders.
 
-The historical batch endpoint (`/api/scores/updates/{epochDay}/{hourOfDay}/{interval}`) has a known second-half data reconstruction issue. Match clock values jump backwards in second-half batches and stat updates arrive with 20+ minute delays on some fixtures. The live SSE stream does not have this issue -- it is specific to the batch reconstruction pipeline. We built a clock sanity filter to handle this, but teams building analytical tools on historical data should be aware of it.
+The historical batch endpoint (`/api/scores/updates/{epochDay}/{hourOfDay}/{interval}`) has a known second-half data reconstruction issue. Match clock values jump backwards in second-half batches and stat updates arrive with 20+ minute delays on some fixtures. The live SSE stream does not have this issue -- it is specific to the batch reconstruction pipeline.
+
+One important behaviour to understand: TxLINE fires `action=goal` with empty Stats (`{}`). The actual stat update (`Stats['1001']` incrementing) arrives as a completely separate score event approximately 54 seconds later. Any system that tries to read goal confirmation from the Stats field of the goal action itself will always see 0. The stat update must be listened for as a separate incoming event. We built the verifier to watch for ANY stat key increment across subsequent events rather than reading from the initial goal action.
 
 ---
 
