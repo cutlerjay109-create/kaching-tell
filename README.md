@@ -5,11 +5,9 @@
 ![Solana](https://img.shields.io/badge/Solana-Mainnet-14F195?logo=solana&logoColor=white)
 ![TxLINE](https://img.shields.io/badge/Data-TxLINE-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)
-![Accuracy](https://img.shields.io/badge/Accuracy-100%25-brightgreen)
-![Lead Time](https://img.shields.io/badge/Avg%20Lead-54s-orange)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-**[Live Dashboard](https://kaching-tell-production.up.railway.app)** · **[Demo Video](https://YOUR-VIDEO-URL)** · **[On-Chain Proof](https://solscan.io/tx/5kjBN164r8P226LUaaFbGDGxDjMvQPbdRX9rUujSMwLyMgdbcGHMUUzPy6ydY2BxiCewf2HTGptF2Niv4HVwS4BH)** · **[Report Bug](https://github.com/cutlerjay109-create/kaching-tell/issues)**
+**[Live Dashboard](https://kaching-tell-production.up.railway.app)** · **[On-Chain Proof](https://solscan.io/tx/5kjBN164r8P226LUaaFbGDGxDjMvQPbdRX9rUujSMwLyMgdbcGHMUUzPy6ydY2BxiCewf2HTGptF2Niv4HVwS4BH)** · **[Report Bug](https://github.com/cutlerjay109-create/kaching-tell/issues)**
 
 
 ## Important Note On Live Detections
@@ -150,13 +148,13 @@ Their business is selling data to apps, betting platforms, and media companies. 
 
 They open the DEMO / LEDGER tab. They see every detection from live World Cup matches — each with a Solana timestamp, accuracy rating, lead time, and which team scored. They do not have to trust the numbers. They verify each transaction themselves on Solana explorer. The blockchain is the proof of record.
 
-No sales call. No trial period. The ledger proves itself.
+No sales call. No trial period. The code proves itself.
 
 ### The Hackathon Judge
 
 They are reviewing 50 submissions. Most are dashboards with charts.
 
-They open kaching-tell. The agent is running right now, watching every active World Cup match autonomously. The ledger shows it already detected goals from past matches. Every detection has a mainnet Solana transaction with a timestamp that predates the official stat confirmation. Accuracy is 100%. Average lead time is 54 seconds.
+They open kaching-tell. The agent is running right now, watching every active World Cup match autonomously. The pipeline has been validated end-to-end including detection, Solana anchoring, and stat verification on both first and second half events.
 
 They click a transaction hash. Solana explorer opens. The memo field contains the full detection payload — fixture ID, match clock, spike magnitude, confidence level. It was written before the official confirmation arrived.
 
