@@ -6,64 +6,59 @@ class Verifier extends EventEmitter {
   constructor() {
     super();
     this.pending = new Map();
+    this.baselines = new Map(); // fixtureId -> { totalGoals, homeGoals, awayGoals }
+  }
+
+  seedBaseline(fixtureId, totalGoals, homeGoals, awayGoals) {
+    this.baselines.set(fixtureId, { totalGoals, homeGoals, awayGoals });
+    logger.info('verifier', 'Baseline seeded', { fixtureId, totalGoals, homeGoals, awayGoals });
   }
 
   watch(detection) {
     const key = detection.fixtureId + ':' + detection.wallTs;
-    const prevGoals = detection.currentStats['1'] || 0;
-    const prevHome = detection.currentStats['1001'] || 0;
-    const prevAway = detection.currentStats['1002'] || 0;
+
+    // Use seeded baseline if available, otherwise use detection stats
+    const baseline = this.baselines.get(detection.fixtureId);
+    const prevGoals = baseline ? baseline.totalGoals : (detection.currentStats['1'] || 0);
+    const prevHome = baseline ? baseline.homeGoals : (detection.currentStats['1001'] || 0);
+    const prevAway = baseline ? baseline.awayGoals : (detection.currentStats['1002'] || 0);
 
     const timer = setTimeout(() => {
       if (this.pending.has(key)) {
         this.pending.delete(key);
-        logger.warn('verifier', 'Timeout — false positive', {
-          key,
-          reason: 'No stat increment within 5 minutes'
-        });
+        logger.warn('verifier', 'Timeout — false positive', { key });
         this.emit('result', {
           ...detection,
           status: 'false_positive',
           leadTimeMs: null,
-          fpReason: detection.fpReason || 'No stat increment within 5 minutes — likely VAR or disallowed goal'
+          fpReason: detection.fpReason || 'No stat increment within 5 minutes'
         });
       }
     }, VERIFICATION_TIMEOUT);
 
-    this.pending.set(key, {
-      detection,
-      prevGoals,
-      prevHome,
-      prevAway,
-      timer,
-      startedAt: Date.now()
-    });
-
-    logger.info('verifier', 'Watching for confirmation', {
-      key,
-      prevGoals,
-      prevHome,
-      prevAway
-    });
+    this.pending.set(key, { detection, prevGoals, prevHome, prevAway, timer, startedAt: Date.now() });
+    logger.info('verifier', 'Watching for confirmation', { key, prevGoals, prevHome, prevAway });
   }
 
   onScoreEvent(event) {
     if (!event.Stats) return;
-
     const currentGoals = event.Stats['1'] || 0;
     const currentHome = event.Stats['1001'] || 0;
     const currentAway = event.Stats['1002'] || 0;
 
+    // Update baselines
+    const existing = this.baselines.get(event.FixtureId) || { totalGoals: 0, homeGoals: 0, awayGoals: 0 };
+    if (currentGoals > existing.totalGoals) {
+      this.baselines.set(event.FixtureId, { totalGoals: currentGoals, homeGoals: currentHome, awayGoals: currentAway });
+    }
+
     this.pending.forEach((entry, key) => {
       if (entry.detection.fixtureId !== event.FixtureId) return;
-
       if (currentGoals > entry.prevGoals) {
         clearTimeout(entry.timer);
         this.pending.delete(key);
-
         const leadTimeMs = Date.now() - entry.startedAt;
 
-        // Determine which team actually scored from stat increment
         let confirmedScoringTeam = entry.detection.scoringTeam;
         let confirmedScore = entry.detection.scoreAtDetection;
 
@@ -75,12 +70,7 @@ class Verifier extends EventEmitter {
           confirmedScore = currentHome + ' - ' + currentAway;
         }
 
-        logger.info('verifier', 'VERIFIED', {
-          key,
-          leadTimeMs,
-          confirmedScoringTeam,
-          confirmedScore
-        });
+        logger.info('verifier', 'VERIFIED', { key, leadTimeMs, confirmedScoringTeam, confirmedScore });
 
         this.emit('result', {
           ...entry.detection,
@@ -93,6 +83,9 @@ class Verifier extends EventEmitter {
           confirmedScore,
           scoreAtDetection: confirmedScore
         });
+
+        // Update baseline after verification
+        this.baselines.set(event.FixtureId, { totalGoals: currentGoals, homeGoals: currentHome, awayGoals: currentAway });
       }
     });
   }

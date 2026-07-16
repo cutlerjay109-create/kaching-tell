@@ -5,7 +5,7 @@ const { SpikeDetector } = require('./spikeDetector');
 const logger = require('../utils/logger');
 
 const GOAL_WINDOW = 15000;
-const COOLDOWN_EVENT_MS = 30000;
+const COOLDOWN_EVENT_MS = 120000;
 
 class GoalDetector extends EventEmitter {
   constructor(fixture) {

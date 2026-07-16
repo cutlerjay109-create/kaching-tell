@@ -8,15 +8,53 @@ const { writeLedger, readLedger } = require('./ledger/writer');
 const { hashDetection } = require('./utils/hash');
 const { startDashboard } = require('./dashboard/server');
 const logger = require('./utils/logger');
+const axios = require('axios');
 
 const store = new Store();
 const verifier = new Verifier();
 const detectors = new Map();
 
+const client = axios.create({
+  baseURL: process.env.TXLINE_API_ORIGIN,
+  headers: {
+    'Authorization': 'Bearer ' + process.env.TXLINE_JWT,
+    'X-Api-Token': process.env.TXLINE_API_TOKEN,
+  },
+  timeout: 15000
+});
+
+async function fetchCurrentScore(fixtureId) {
+  try {
+    const now = new Date();
+    const day = Math.floor(Date.now() / 86400000);
+    const hour = now.getUTCHours();
+    const allEvents = [];
+    for (const h of [hour-1, hour]) {
+      for (const i of [0,1,2,3,4,5]) {
+        try {
+          const res = await client.get('/api/scores/updates/' + day + '/' + h + '/' + i);
+          allEvents.push(...res.data.filter(s => s.FixtureId === fixtureId));
+        } catch(e) {}
+      }
+    }
+    allEvents.sort((a,b) => a.Ts - b.Ts);
+    const latest = allEvents[allEvents.length - 1];
+    if (latest && latest.Stats) {
+      const homeGoals = latest.Stats['1001'] || 0;
+      const awayGoals = latest.Stats['1002'] || 0;
+      const totalGoals = latest.Stats['1'] || 0;
+      logger.info('main', 'Current score fetched', { fixtureId, homeGoals, awayGoals, totalGoals });
+      return { homeGoals, awayGoals, totalGoals };
+    }
+  } catch(e) {
+    logger.warn('main', 'Could not fetch current score', { err: e.message });
+  }
+  return { homeGoals: 0, awayGoals: 0, totalGoals: 0 };
+}
+
 async function main() {
   logger.info('main', 'kaching-tell starting');
 
-  // Load existing ledger into store on startup
   const existing = readLedger();
   if (existing && existing.detections && existing.detections.length > 0) {
     existing.detections.forEach(d => store.addDetection(d));
@@ -27,7 +65,7 @@ async function main() {
 
   const manager = new StreamManager(
     (scoreEvent) => handleScore(scoreEvent),
-    (oddsEvent)  => handleOdds(oddsEvent)
+    (oddsEvent) => handleOdds(oddsEvent)
   );
 
   const fixtures = await manager.start();
@@ -37,10 +75,27 @@ async function main() {
     return;
   }
 
-  fixtures.forEach(fixture => {
+  // For each fixture fetch current score to seed state
+  for (const fixture of fixtures) {
+    const currentScore = await fetchCurrentScore(fixture.FixtureId);
+
     const detector = new GoalDetector(fixture);
+
+    // Seed the detector with current score so it knows real state
+    detector.homeGoals = currentScore.homeGoals;
+    detector.awayGoals = currentScore.awayGoals;
+
     detectors.set(fixture.FixtureId, detector);
     store.setMatchInfo(fixture.FixtureId, fixture);
+
+    logger.info('main', 'Detector seeded', {
+      fixture: fixture.Participant1 + ' vs ' + fixture.Participant2,
+      homeGoals: currentScore.homeGoals,
+      awayGoals: currentScore.awayGoals
+    });
+
+    // Seed verifier with current goal count as baseline
+    verifier.seedBaseline(fixture.FixtureId, currentScore.totalGoals, currentScore.homeGoals, currentScore.awayGoals);
 
     detector.on('detection', async (detection) => {
       store.addDetection(detection);
@@ -56,19 +111,22 @@ async function main() {
       detectors.delete(fixtureId);
       writeLedger(store);
     });
-  });
+  }
 
   verifier.on('result', (result) => {
     store.updateDetection(result.wallTs, result.fixtureId, {
       status: result.status,
       leadTimeMs: result.leadTimeMs,
-      confirmedGoals: result.confirmedGoals
+      confirmedScoringTeam: result.confirmedScoringTeam,
+      confirmedScore: result.confirmedScore
     });
-    logger.info('main', 'Verification: ' + result.status, { fixtureId: result.fixtureId });
+    logger.info('main', 'Verification: ' + result.status, {
+      fixtureId: result.fixtureId,
+      leadTimeMs: result.leadTimeMs
+    });
     writeLedger(store);
   });
 
-  // Only write ledger periodically if there is data
   setInterval(() => {
     if (store.getAll().length > 0) writeLedger(store);
   }, 30000);
