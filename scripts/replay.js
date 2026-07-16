@@ -6,6 +6,7 @@ const { Store } = require('../src/ledger/store');
 const { writeLedger } = require('../src/ledger/writer');
 const { anchorDetection } = require('../src/anchor/anchor');
 const { hashDetection } = require('../src/utils/hash');
+const { COMPETITION_ID } = require('../src/config/constants');
 const logger = require('../src/utils/logger');
 
 const client = axios.create({
@@ -17,29 +18,39 @@ const client = axios.create({
   timeout: 60000
 });
 
-const FIXTURE = {
-  FixtureId: 17926687,
-  Participant1: 'France',
-  Participant2: 'Morocco',
-  StartTime: 1781974800000
-};
-const DAY = 20624;
-const HOURS = [17, 18, 19, 20];
+// Optional: pass fixture ID as argument e.g. node scripts/replay.js 17926687
+const TARGET_FIXTURE_ID = process.argv[2] ? parseInt(process.argv[2]) : null;
 
 async function safeFetch(url) {
   try { return (await client.get(url)).data || []; } catch(e) { return []; }
 }
 
-async function main() {
-  logger.info('replay', 'Fetching historical data...');
+function getEpochDay(date) {
+  return Math.floor(date.getTime() / 86400000);
+}
+
+function getHoursForMatch(startTimeMs) {
+  const start = new Date(startTimeMs);
+  const startHour = start.getUTCHours();
+  // Cover 3 hours from kickoff to handle full match + extra time
+  return [startHour, startHour + 1, startHour + 2, startHour + 3].filter(h => h >= 0 && h <= 23);
+}
+
+async function fetchMatchData(fixture) {
+  const startDate = new Date(fixture.StartTime);
+  const epochDay = getEpochDay(startDate);
+  const hours = getHoursForMatch(fixture.StartTime);
+
+  logger.info('replay', 'Fetching data for ' + fixture.Participant1 + ' vs ' + fixture.Participant2, { epochDay, hours });
 
   const scoreUrls = [];
   const oddsUrls = [];
-  for (const h of HOURS)
+  for (const h of hours) {
     for (const i of [0,1,2,3,4,5]) {
-      scoreUrls.push('/api/scores/updates/' + DAY + '/' + h + '/' + i);
-      oddsUrls.push('/api/odds/updates/' + DAY + '/' + h + '/' + i);
+      scoreUrls.push('/api/scores/updates/' + epochDay + '/' + h + '/' + i);
+      oddsUrls.push('/api/odds/updates/' + epochDay + '/' + h + '/' + i);
     }
+  }
 
   const [scoreChunks, oddsChunks] = await Promise.all([
     Promise.all(scoreUrls.map(u => safeFetch(u))),
@@ -47,70 +58,83 @@ async function main() {
   ]);
 
   const scores = scoreChunks.flat()
-    .filter(s => s.FixtureId === FIXTURE.FixtureId && s.Action)
+    .filter(s => s.FixtureId === fixture.FixtureId && s.Action)
     .sort((a,b) => a.Ts - b.Ts);
 
   const odds = oddsChunks.flat()
-    .filter(o => o.FixtureId === FIXTURE.FixtureId && o.InRunning && o.Prices && o.Prices.length)
+    .filter(o => o.FixtureId === fixture.FixtureId && o.InRunning && o.Prices && o.Prices.length)
     .sort((a,b) => a.Ts - b.Ts);
 
-  logger.info('replay', 'Scores: ' + scores.length + ' | Odds: ' + odds.length);
+  return { scores, odds };
+}
+
+async function replayFixture(fixture) {
+  logger.info('replay', '=== REPLAYING: ' + fixture.Participant1 + ' vs ' + fixture.Participant2 + ' ===');
+
+  const { scores, odds } = await fetchMatchData(fixture);
+  logger.info('replay', 'Score events: ' + scores.length + ' | Odds events: ' + odds.length);
+
+  if (!scores.length || !odds.length) {
+    logger.warn('replay', 'Insufficient data for this fixture. Try a different one.');
+    return;
+  }
 
   const store = new Store();
   const verifier = new Verifier();
-  const detector = new GoalDetector(FIXTURE);
-
+  const detector = new GoalDetector(fixture);
   let detectionCount = 0;
 
-  detector.on('detection', async (detection) => {
+  detector.on('detection', async (d) => {
     detectionCount++;
-    logger.info('replay', 'DETECTION #' + detectionCount, {
-      scoringTeam: detection.scoringTeam,
-      clock: detection.matchClockFormatted,
-      score: detection.scoreAtDetection,
-      spike: detection.spikeMagnitude,
-      conf: detection.confidence,
-      market: detection.marketType
-    });
-
-    store.addDetection(detection);
-    const hash = hashDetection(detection);
-    const sig = await anchorDetection(detection, hash);
-    store.updateDetection(detection.wallTs, detection.fixtureId, { txSig: sig, hash });
-    verifier.watch(detection);
+    logger.info('replay', 'DETECTION #' + detectionCount + ' | ' + d.scoringTeam + ' scored at ' + d.matchClockFormatted + ' | Score: ' + d.scoreAtDetection + ' | Confidence: ' + d.confidence);
+    store.addDetection(d);
+    verifier.watch(d);
+    const sig = await anchorDetection(d, hashDetection(d));
+    if (sig) {
+      store.updateDetection(d.wallTs, d.fixtureId, { txSig: sig });
+      logger.info('replay', 'ANCHORED ON SOLANA: ' + sig.substring(0,20) + '...');
+    }
     writeLedger(store);
   });
 
-  verifier.on('result', (result) => {
-    logger.info('replay', 'RESULT: ' + result.status, {
-      confirmedScoringTeam: result.confirmedScoringTeam,
-      confirmedScore: result.confirmedScore,
-      leadTimeMs: result.leadTimeMs
-    });
-    store.updateDetection(result.wallTs, result.fixtureId, {
-      status: result.status,
-      leadTimeMs: result.leadTimeMs,
-      confirmedScoringTeam: result.confirmedScoringTeam,
-      confirmedScore: result.confirmedScore,
-      scoreAtDetection: result.confirmedScore,
-      fpReason: result.fpReason
+  verifier.on('result', (r) => {
+    store.updateDetection(r.wallTs, r.fixtureId, {
+      status: r.status,
+      leadTimeMs: r.leadTimeMs,
+      confirmedScoringTeam: r.confirmedScoringTeam,
+      scoreAtDetection: r.confirmedScore || r.scoreAtDetection
     });
     writeLedger(store);
+    if (r.status === 'verified') {
+      logger.info('replay', 'VERIFIED: ' + r.confirmedScoringTeam + ' | Score: ' + r.confirmedScore + ' | Lead: ' + Math.round((r.leadTimeMs||0)/1000) + 's');
+    } else {
+      logger.warn('replay', 'FALSE POSITIVE: ' + (r.fpReason || 'stat did not increment'));
+    }
   });
 
+  // Pass 1: feed all events through detector
   const allEvents = [
     ...scores.map(s => ({ ...s, _type: 'score' })),
     ...odds.map(o => ({ ...o, _type: 'odds' }))
   ].sort((a,b) => a.Ts - b.Ts);
 
-  logger.info('replay', 'Replaying ' + allEvents.length + ' events...');
-
+  logger.info('replay', 'Pass 1: replaying ' + allEvents.length + ' events...');
   for (const event of allEvents) {
     if (event._type === 'score') {
       detector.onScoreEvent(event);
-      verifier.onScoreEvent(event);
     } else {
       detector.onOddsEvent(event);
+    }
+  }
+
+  // Wait for all detections to fire
+  await new Promise(r => setTimeout(r, 8000));
+
+  // Pass 2: feed score events again so verifier can confirm
+  logger.info('replay', 'Pass 2: verifier confirmation pass...');
+  for (const event of allEvents) {
+    if (event._type === 'score') {
+      verifier.onScoreEvent(event);
     }
   }
 
@@ -118,15 +142,46 @@ async function main() {
   await new Promise(r => setTimeout(r, 15000));
 
   const stats = store.getStats();
-  logger.info('replay', 'Complete', {
-    detections: detectionCount,
-    verified: stats.verified,
-    fp: stats.fp,
-    accuracy: stats.accuracy,
-    avgLead: stats.avgLead + 's'
+  logger.info('replay', '=== REPLAY COMPLETE ===');
+  logger.info('replay', 'Detections: ' + stats.total + ' | Verified: ' + stats.verified + ' | FP: ' + stats.fp + ' | Accuracy: ' + stats.accuracy + '% | Avg Lead: ' + stats.avgLead + 's');
+}
+
+async function main() {
+  // Fetch all World Cup fixtures
+  logger.info('replay', 'Fetching World Cup fixtures...');
+  const res = await client.get('/api/fixtures/snapshot');
+  const all = res.data || [];
+  const wc = all.filter(f => f.CompetitionId === COMPETITION_ID);
+
+  logger.info('replay', 'Available World Cup fixtures:');
+  wc.forEach((f, i) => {
+    logger.info('replay', '  [' + i + '] FixtureId: ' + f.FixtureId + ' | ' + f.Participant1 + ' vs ' + f.Participant2 + ' | Start: ' + new Date(f.StartTime).toISOString());
   });
 
+  let fixture;
+  if (TARGET_FIXTURE_ID) {
+    // Use specified fixture
+    fixture = wc.find(f => f.FixtureId === TARGET_FIXTURE_ID);
+    if (!fixture) {
+      // Try with hardcoded known fixture
+      fixture = { FixtureId: TARGET_FIXTURE_ID, Participant1: 'Home Side', Participant2: 'Away Side', StartTime: Date.now() - 7200000 };
+      logger.warn('replay', 'Fixture not in current snapshot — using provided ID with generic names');
+    }
+  } else if (wc.length > 0) {
+    // Use first available World Cup fixture
+    fixture = wc[0];
+    logger.info('replay', 'No fixture specified — using: ' + fixture.Participant1 + ' vs ' + fixture.Participant2);
+    logger.info('replay', 'Tip: run with a specific fixture ID: node scripts/replay.js <fixtureId>');
+  } else {
+    logger.error('replay', 'No World Cup fixtures available. Check your TxLINE credentials.');
+    process.exit(1);
+  }
+
+  await replayFixture(fixture);
   process.exit(0);
 }
 
-main().catch(console.error);
+main().catch(err => {
+  logger.error('replay', 'Fatal: ' + err.message);
+  process.exit(1);
+});
