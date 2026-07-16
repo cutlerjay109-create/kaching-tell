@@ -100,7 +100,7 @@ kaching-tell does something fundamentally different:
 - It tracks the **running score** throughout each match using stat keys `1001` (home) and `1002` (away)
 - It writes a **tamper-proof on-chain receipt** for every detection at the moment it fires — not after confirmation
 - It builds a **verifiable calibration ledger** — a public performance record with blockchain proof for every entry
-- It handles **data corruption** — a clock sanity filter discards any score event where wall clock exceeds match clock by more than 5 minutes, protecting against the known second-half batch reconstruction issue in historical data
+- It handles **data corruption** — a clock sanity filter discards any score event where wall clock exceeds match clock by more than 90 minutes, protecting against the known second-half batch reconstruction issue in historical data
 
 The on-chain timestamp is the differentiator. Anyone can claim their system detected something early. Only kaching-tell can prove it.
 
