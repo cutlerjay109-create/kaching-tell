@@ -69,7 +69,14 @@ async function fetchMatchData(fixture) {
 }
 
 async function replayFixture(fixture) {
-  logger.info('replay', '=== REPLAYING: ' + fixture.Participant1 + ' vs ' + fixture.Participant2 + ' ===');
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🚀  kaching-tell — Goal Detection Pipeline');
+  console.log('   Match: ' + fixture.Participant1 + ' vs ' + fixture.Participant2);
+  console.log('   Fixture ID: ' + fixture.FixtureId);
+  console.log('   Data source: TxLINE World Cup feed');
+  console.log('   Solana: Mainnet');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   const { scores, odds } = await fetchMatchData(fixture);
   logger.info('replay', 'Score events: ' + scores.length + ' | Odds events: ' + odds.length);
@@ -86,14 +93,35 @@ async function replayFixture(fixture) {
 
   detector.on('detection', async (d) => {
     detectionCount++;
-    logger.info('replay', 'DETECTION #' + detectionCount + ' | ' + d.scoringTeam + ' scored at ' + d.matchClockFormatted + ' | Score: ' + d.scoreAtDetection + ' | Confidence: ' + d.confidence);
+
+    console.log('');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('⚽  GOAL DETECTED');
+    console.log('   Match:       ' + d.matchName);
+    console.log('   Team:        ' + d.scoringTeam);
+    console.log('   Clock:       ' + d.matchClockFormatted);
+    console.log('   Score:       ' + d.scoreAtDetection);
+    console.log('   Confidence:  ' + d.confidence);
+    console.log('   Spike:       ' + d.spikeMagnitude + ' (' + d.spikeRatio + 'x baseline)');
+    console.log('   Market:      ' + d.marketType);
+    console.log('   Detected at: ' + new Date(d.wallTs).toISOString());
+    console.log('   Source:      TxLINE fixture ' + d.fixtureId);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
     store.addDetection(d);
     verifier.watch(d);
+
+    console.log('🔗  Anchoring detection to Solana mainnet...');
     const sig = await anchorDetection(d, hashDetection(d));
     if (sig) {
       store.updateDetection(d.wallTs, d.fixtureId, { txSig: sig });
-      logger.info('replay', 'ANCHORED ON SOLANA: ' + sig.substring(0,20) + '...');
+      console.log('✅  Anchored on Solana mainnet');
+      console.log('   Transaction: ' + sig);
+      console.log('   Verify at:   https://solscan.io/tx/' + sig);
+    } else {
+      console.log('⚠️  Anchor failed — detection recorded without on-chain proof');
     }
+    console.log('');
     writeLedger(store);
   });
 
@@ -105,10 +133,17 @@ async function replayFixture(fixture) {
       scoreAtDetection: r.confirmedScore || r.scoreAtDetection
     });
     writeLedger(store);
+
     if (r.status === 'verified') {
-      logger.info('replay', 'VERIFIED: ' + r.confirmedScoringTeam + ' | Score: ' + r.confirmedScore + ' | Lead: ' + Math.round((r.leadTimeMs||0)/1000) + 's');
+      console.log('✅  VERIFIED — Official stat confirmed goal');
+      console.log('   Scorer:    ' + r.confirmedScoringTeam);
+      console.log('   Score:     ' + r.confirmedScore);
+      console.log('   Lead time: ' + Math.round((r.leadTimeMs||0)/1000) + ' seconds before official confirmation');
+      console.log('');
     } else {
-      logger.warn('replay', 'FALSE POSITIVE: ' + (r.fpReason || 'stat did not increment'));
+      console.log('❌  FALSE POSITIVE — Stat did not increment within 5 minutes');
+      console.log('   Reason: ' + (r.fpReason || 'VAR review or disallowed goal'));
+      console.log('');
     }
   });
 
@@ -118,7 +153,11 @@ async function replayFixture(fixture) {
     ...odds.map(o => ({ ...o, _type: 'odds' }))
   ].sort((a,b) => a.Ts - b.Ts);
 
-  logger.info('replay', 'Pass 1: replaying ' + allEvents.length + ' events...');
+  console.log('');
+  console.log('📡  Replaying ' + allEvents.length + ' real TxLINE events from ' + fixture.Participant1 + ' vs ' + fixture.Participant2 + '...');
+  console.log('   Score events: ' + scores.length);
+  console.log('   Odds events:  ' + odds.length);
+  console.log('');
   for (const event of allEvents) {
     if (event._type === 'score') {
       detector.onScoreEvent(event);
@@ -131,7 +170,7 @@ async function replayFixture(fixture) {
   await new Promise(r => setTimeout(r, 8000));
 
   // Pass 2: feed score events again so verifier can confirm
-  logger.info('replay', 'Pass 2: verifier confirmation pass...');
+  console.log('⏳  Waiting for official stat confirmation...');
   for (const event of allEvents) {
     if (event._type === 'score') {
       verifier.onScoreEvent(event);
@@ -142,8 +181,15 @@ async function replayFixture(fixture) {
   await new Promise(r => setTimeout(r, 15000));
 
   const stats = store.getStats();
-  logger.info('replay', '=== REPLAY COMPLETE ===');
-  logger.info('replay', 'Detections: ' + stats.total + ' | Verified: ' + stats.verified + ' | FP: ' + stats.fp + ' | Accuracy: ' + stats.accuracy + '% | Avg Lead: ' + stats.avgLead + 's');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📊  CALIBRATION LEDGER SUMMARY');
+  console.log('   Total detections: ' + stats.total);
+  console.log('   Verified:         ' + stats.verified);
+  console.log('   False positives:  ' + stats.fp);
+  console.log('   Accuracy:         ' + stats.accuracy + '%');
+  console.log('   Avg lead time:    ' + stats.avgLead + 's before official confirmation');
+  console.log('   Dashboard:        https://kaching-tell-production.up.railway.app');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 }
 
 async function main() {
@@ -153,10 +199,12 @@ async function main() {
   const all = res.data || [];
   const wc = all.filter(f => f.CompetitionId === COMPETITION_ID);
 
-  logger.info('replay', 'Available World Cup fixtures:');
+  console.log('');
+  console.log('🏆  Available World Cup fixtures:');
   wc.forEach((f, i) => {
-    logger.info('replay', '  [' + i + '] FixtureId: ' + f.FixtureId + ' | ' + f.Participant1 + ' vs ' + f.Participant2 + ' | Start: ' + new Date(f.StartTime).toISOString());
+    console.log('   [' + i + '] ' + f.Participant1 + ' vs ' + f.Participant2 + ' | Start: ' + new Date(f.StartTime).toISOString() + ' | Id: ' + f.FixtureId);
   });
+  console.log('');
 
   let fixture;
   if (TARGET_FIXTURE_ID) {
@@ -170,8 +218,8 @@ async function main() {
   } else if (wc.length > 0) {
     // Use first available World Cup fixture
     fixture = wc[0];
-    logger.info('replay', 'No fixture specified — using: ' + fixture.Participant1 + ' vs ' + fixture.Participant2);
-    logger.info('replay', 'Tip: run with a specific fixture ID: node scripts/replay.js <fixtureId>');
+    console.log('ℹ️   No fixture specified — using: ' + fixture.Participant1 + ' vs ' + fixture.Participant2);
+    console.log('   Tip: run with a specific fixture ID: node scripts/replay.js <fixtureId>');
   } else {
     logger.error('replay', 'No World Cup fixtures available. Check your TxLINE credentials.');
     process.exit(1);
