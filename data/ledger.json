@@ -1,12 +1,1 @@
-{
-  "updatedAt": "2026-07-19T03:38:16.780Z",
-  "stats": {
-    "total": 0,
-    "verified": 0,
-    "fp": 0,
-    "pending": 0,
-    "avgLead": 0,
-    "accuracy": "N/A"
-  },
-  "detections": []
-}
+{"detections":[],"stats":{"total":0,"verified":0,"fp":0,"pending":0,"avgLead":0,"accuracy":"N/A"}}
