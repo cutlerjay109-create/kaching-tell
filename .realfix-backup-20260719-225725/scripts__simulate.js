@@ -69,18 +69,12 @@ for (const g of goals) {
     MessageId: 'm' + goalTs + 's', InRunning: true, SuperOddsType: 'OVERUNDER_PARTICIPANT_GOALS',
     Prices: [10000]
   });
-  // 2) stat confirmation — arrives 54s later as a SEPARATE event (ground truth).
-  // Real TxLINE carries goals in the Score object (Participant1/2 .Total.Goals),
-  // NOT Stats['1001']/['1002'] (which are period/stat-type slots). Mirror that here.
+  // 2) stat increment — arrives 54s later as a SEPARATE event (ground truth)
   if (g.side === 'home') home++; else away++;
   events.push({
     _type: 'score', FixtureId: fixture.FixtureId, Action: 'score_update',
     Ts: goalTs + 54000, Seq: goalTs + 54000, Clock: { Seconds: g.min * 60 + 54 },
-    Score: {
-      Participant1: { Total: { Goals: home } },
-      Participant2: { Total: { Goals: away } }
-    },
-    Stats: { '1': home, '2': away }
+    Stats: { '1001': home, '1002': away }
   });
 }
 
