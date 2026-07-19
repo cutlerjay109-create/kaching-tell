@@ -1,6 +1,4 @@
-const { SPIKE_THRESHOLD, MIN_SPIKE_DELTA, MIN_BASELINE } = require('../config/constants');
-
-const BASELINE_FLOOR = MIN_BASELINE || 1;
+const { SPIKE_THRESHOLD, MIN_SPIKE_DELTA } = require('../config/constants');
 
 class SpikeDetector {
   constructor(baselineCalculator) {
@@ -10,7 +8,6 @@ class SpikeDetector {
   }
 
   update(oddsEvent) {
-    if (!oddsEvent || !oddsEvent.Prices || !oddsEvent.Prices.length) return null;
     this.recentWindow.push(oddsEvent);
     if (this.recentWindow.length > this.WINDOW_SIZE) {
       this.recentWindow = this.recentWindow.slice(-this.WINDOW_SIZE);
@@ -20,16 +17,14 @@ class SpikeDetector {
 
   check() {
     if (this.recentWindow.length < 2) return null;
-    const rawBaseline = this.baseline.getBaseline();
-    if (!(rawBaseline > 0)) return null;
-    // Floor the baseline so a near-zero calm period can't create absurd ratios.
-    const baseline = Math.max(rawBaseline, BASELINE_FLOOR);
+    const baseline = this.baseline.getBaseline();
+    if (baseline === 0) return null;
 
     let totalDelta = 0;
     let totalTime = 0;
     for (let i = 1; i < this.recentWindow.length; i++) {
-      const delta = Math.abs(this.recentWindow[i].Prices[0] - this.recentWindow[i - 1].Prices[0]);
-      const dt = (this.recentWindow[i].Ts - this.recentWindow[i - 1].Ts) / 1000;
+      const delta = Math.abs(this.recentWindow[i].Prices[0] - this.recentWindow[i-1].Prices[0]);
+      const dt = (this.recentWindow[i].Ts - this.recentWindow[i-1].Ts) / 1000;
       if (dt > 0) { totalDelta += delta; totalTime += dt; }
     }
 
@@ -44,8 +39,7 @@ class SpikeDetector {
         detected: true,
         velocity: currentVelocity,
         baseline,
-        // Numeric ratio (rounded) so downstream confidence thresholds compare cleanly.
-        ratio: Math.round(ratio * 100) / 100,
+        ratio: ratio.toFixed(2),
         magnitude: maxDelta,
         ts: this.recentWindow[this.recentWindow.length - 1].Ts
       };

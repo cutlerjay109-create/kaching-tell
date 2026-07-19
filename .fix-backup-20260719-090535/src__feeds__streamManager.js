@@ -14,21 +14,6 @@ const client = axios.create({
   timeout: 15000
 });
 
-// Cap on how many dedup keys we retain (prevents unbounded memory on long matches).
-const MAX_SEEN = 5000;
-
-function rememberKey(set, key) {
-  if (set.has(key)) return false;
-  set.add(key);
-  if (set.size > MAX_SEEN) {
-    // Drop the oldest ~10% (insertion order preserved by Set).
-    const drop = Math.floor(MAX_SEEN * 0.1);
-    let i = 0;
-    for (const k of set) { set.delete(k); if (++i >= drop) break; }
-  }
-  return true;
-}
-
 function getCurrentSlots() {
   const now = new Date();
   const epochDay = Math.floor(Date.now() / 86400000);
@@ -44,7 +29,7 @@ function getCurrentSlots() {
 }
 
 async function safeFetch(url) {
-  try { return (await client.get(url)).data || []; } catch (e) { return []; }
+  try { return (await client.get(url)).data || []; } catch(e) { return []; }
 }
 
 class StreamManager {
@@ -71,6 +56,8 @@ class StreamManager {
     logger.info('streamManager', 'Monitoring ' + this.fixtures.length + ' fixtures', { ids: [...this.fixtureIds] });
     this.running = true;
 
+    // Wait 2 seconds after fixtures loaded before connecting SSE
+    // This ensures fixtureIds is fully populated before any events arrive
     await new Promise(r => setTimeout(r, 2000));
 
     this._connectScores();
@@ -84,7 +71,7 @@ class StreamManager {
       fetch: (input, init) => fetch(input, {
         ...init,
         headers: {
-          ...(init && init.headers ? init.headers : {}),
+          ...init.headers,
           'Authorization': 'Bearer ' + process.env.TXLINE_JWT,
           'X-Api-Token': process.env.TXLINE_API_TOKEN,
         }
@@ -103,15 +90,16 @@ class StreamManager {
         const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!data.FixtureId || !this.fixtureIds.has(data.FixtureId)) return;
         const key = data.FixtureId + ':' + data.Seq + ':' + data.Ts;
-        if (!rememberKey(this.seenScores, key)) return;
+        if (this.seenScores.has(key)) return;
+        this.seenScores.add(key);
         logger.info('streamManager', 'SSE score event', { fixtureId: data.FixtureId, action: data.Action });
         this.onScore(data);
-      } catch (err) { logger.error('streamManager', 'Score parse error', { err: err.message }); }
+      } catch(err) { logger.error('streamManager', 'Score parse error', { err: err.message }); }
     };
     this.scoreSource.onmessage = processScore;
     this.scoreSource.onerror = () => {
-      logger.warn('streamManager', 'Scores SSE error - reconnecting in 5s');
-      try { this.scoreSource.close(); } catch (_) {}
+      logger.warn('streamManager', 'Scores SSE error — reconnecting in 5s');
+      this.scoreSource.close();
       setTimeout(() => { if (this.running) this._connectScores(); }, 5000);
     };
     this.scoreSource.addEventListener('heartbeat', () => {
@@ -131,15 +119,16 @@ class StreamManager {
         if (!data.FixtureId || !this.fixtureIds.has(data.FixtureId)) return;
         if (!data.InRunning || !data.Prices || !data.Prices.length) return;
         const key = data.FixtureId + ':' + data.MessageId;
-        if (!rememberKey(this.seenOdds, key)) return;
+        if (this.seenOdds.has(key)) return;
+        this.seenOdds.add(key);
         logger.info('streamManager', 'SSE odds event', { fixtureId: data.FixtureId, type: data.SuperOddsType, price: data.Prices[0] });
         this.onOdds(data);
-      } catch (err) { logger.error('streamManager', 'Odds parse error', { err: err.message }); }
+      } catch(err) { logger.error('streamManager', 'Odds parse error', { err: err.message }); }
     };
     this.oddsSource.onmessage = processOdds;
     this.oddsSource.onerror = () => {
-      logger.warn('streamManager', 'Odds SSE error - reconnecting in 5s');
-      try { this.oddsSource.close(); } catch (_) {}
+      logger.warn('streamManager', 'Odds SSE error — reconnecting in 5s');
+      this.oddsSource.close();
       setTimeout(() => { if (this.running) this._connectOdds(); }, 5000);
     };
     this.oddsSource.addEventListener('heartbeat', () => {
@@ -168,7 +157,8 @@ class StreamManager {
       .filter(s => this.fixtureIds.has(s.FixtureId))
       .forEach(s => {
         const key = s.FixtureId + ':' + s.Seq + ':' + s.Ts;
-        if (!rememberKey(this.seenScores, key)) return;
+        if (this.seenScores.has(key)) return;
+        this.seenScores.add(key);
         logger.info('streamManager', 'POLL score event', { fixtureId: s.FixtureId, action: s.Action });
         this.onScore(s);
       });
@@ -177,15 +167,16 @@ class StreamManager {
       .filter(o => this.fixtureIds.has(o.FixtureId) && o.InRunning && o.Prices && o.Prices.length)
       .forEach(o => {
         const key = o.FixtureId + ':' + o.MessageId;
-        if (!rememberKey(this.seenOdds, key)) return;
+        if (this.seenOdds.has(key)) return;
+        this.seenOdds.add(key);
         this.onOdds(o);
       });
   }
 
   stop() {
     this.running = false;
-    if (this.scoreSource) { try { this.scoreSource.close(); } catch (_) {} }
-    if (this.oddsSource) { try { this.oddsSource.close(); } catch (_) {} }
+    if (this.scoreSource) this.scoreSource.close();
+    if (this.oddsSource) this.oddsSource.close();
     if (this.pollTimer) clearInterval(this.pollTimer);
     logger.info('streamManager', 'Stopped');
   }

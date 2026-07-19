@@ -2,16 +2,9 @@ module.exports = {
   COMPETITION_ID: 72,
   SPIKE_THRESHOLD: 3,
   BASELINE_WINDOW: 30,
-  // Live confirmation is ~54s; historical batch confirmation can be 20+ min.
-  // This is the hard timeout after which a lone goal action is a false positive.
   VERIFICATION_TIMEOUT: 300000,
-  // Max time an official increment may still confirm a goal action (see verifier).
-  // Generous so replay against batch data does not mass-flag real goals as FP.
-  VERIFICATION_MAX_LAG: 1800000,
   CLOCK_SANITY_LIMIT: 5400,
   MIN_SPIKE_DELTA: 500,
-  // Floor for baseline velocity so a near-zero baseline can't manufacture huge ratios.
-  MIN_BASELINE: 1,
   POLL_INTERVAL: 10000,
   PORT: process.env.PORT || 3000,
   SOLANA_RPC: process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com',

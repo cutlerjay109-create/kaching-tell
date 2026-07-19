@@ -6,44 +6,34 @@ const { parseScore } = require('../utils/score');
 const logger = require('../utils/logger');
 
 const GOAL_WINDOW = 15000;      // spike must land within 15s of the goal action
-const GRACE_MS = 6000;          // wait up to 6s for a spike before firing LOW
+const GRACE_MS = 6000;          // wait up to 6s (event-time) for a spike before firing LOW
 const SPIKE_RETENTION = 30000;  // keep spikes 30s for matching
 // Cooldown only suppresses the SAME goal's repeated/echoed goal actions.
+// 120s was swallowing legitimate second goals; 30s dedups one goal's burst.
 const COOLDOWN_EVENT_MS = 30000;
-// Wall-clock safety net: how often to check for pending goals that must fire even
-// if the live event stream has gone quiet (so a goal is NEVER left unresolved).
-const AUTO_RESOLVE_INTERVAL_MS = 2000;
 
 class GoalDetector extends EventEmitter {
   constructor(fixture) {
     super();
-    this.fixture = fixture || {};
+    this.fixture = fixture;
     this.baseline = new BaselineCalculator();
     this.spike = new SpikeDetector(this.baseline);
-    this.pendingGoals = [];
-    this.recentSpikes = [];
-    this.lastEventTs = 0;
+    this.pendingGoals = [];   // queue — NOT a single slot (fixes lost goals in bursts)
+    this.recentSpikes = [];   // buffered spikes with their event time
+    this.lastEventTs = 0;     // max event time seen — drives resolution deterministically
     this.lastDetectionEventTs = 0;
     this.discardedCount = 0;
     this.lastDiscardLog = 0;
-    this._lastWallTs = 0;
+    this._lastWallTs = 0; // ensures every detection gets a unique wallTs (ledger key)
 
+    // Score tracking
     this.homeGoals = 0;
     this.awayGoals = 0;
     this.lastMarketType = null;
-
-    // Live-only wall-clock resolver. unref'd so it never keeps a replay alive.
-    this._autoResolve = setInterval(() => this._resolveWallClock(), AUTO_RESOLVE_INTERVAL_MS);
-    if (this._autoResolve.unref) this._autoResolve.unref();
   }
 
   onScoreEvent(event) {
-    if (!event) return;
-
-    // game_finalised / goal are too important to ever drop on a clock heuristic.
-    const critical = event.Action === 'goal' || event.Action === 'game_finalised';
-
-    if (!critical && !isSane(event, this.fixture.StartTime)) {
+    if (!isSane(event, this.fixture.StartTime)) {
       this.discardedCount++;
       const now = Date.now();
       if (now - this.lastDiscardLog > 10000) {
@@ -57,7 +47,8 @@ class GoalDetector extends EventEmitter {
       return;
     }
 
-    // Update running score from ALL score events - never go backwards.
+    // Update running score from ALL score events — never go backwards.
+    // Uses the shared parser so detector and verifier read score identically.
     const parsed = parseScore(event);
     if (parsed.hasStats) {
       if (parsed.home > this.homeGoals) this.homeGoals = parsed.home;
@@ -69,12 +60,13 @@ class GoalDetector extends EventEmitter {
 
     if (event.Action === 'goal') {
       if (this.lastDetectionEventTs && (eventTs - this.lastDetectionEventTs) < COOLDOWN_EVENT_MS) {
-        logger.debug('goalDetector', 'Goal action ignored - cooldown active', {
+        logger.debug('goalDetector', 'Goal action ignored — cooldown active', {
           fixtureId: event.FixtureId,
           remainingMs: COOLDOWN_EVENT_MS - (eventTs - this.lastDetectionEventTs)
         });
         return;
       }
+      // Dedup the same goal's echoed actions immediately on accept.
       this.lastDetectionEventTs = eventTs;
 
       const scoringParticipant = event.Participant;
@@ -90,7 +82,6 @@ class GoalDetector extends EventEmitter {
 
       this.pendingGoals.push({
         event, eventTs, scoringTeam, goalType, isHomeGoal,
-        wallSeen: Date.now(),
         homeGoalsAtDetection: this.homeGoals,
         awayGoalsAtDetection: this.awayGoals
       });
@@ -106,7 +97,7 @@ class GoalDetector extends EventEmitter {
   }
 
   onOddsEvent(event) {
-    if (!event || !event.Prices || event.Prices.length === 0) return;
+    if (!event.Prices || event.Prices.length === 0) return;
     this.lastMarketType = event.SuperOddsType;
     const eventTs = event.Ts || Date.now();
     if (eventTs > this.lastEventTs) this.lastEventTs = eventTs;
@@ -118,45 +109,24 @@ class GoalDetector extends EventEmitter {
     this._resolve();
   }
 
-  _pruneSpikes() {
+  // Resolve pending goals by event time: match a spike if one is near, otherwise
+  // fire LOW once the grace window has passed. Never overwrites/loses a goal.
+  _resolve(force = false) {
+    // Prune stale spikes
     const cutoff = this.lastEventTs - SPIKE_RETENTION;
     if (this.recentSpikes.length) {
       this.recentSpikes = this.recentSpikes.filter(s => s.eventTs >= cutoff);
     }
-  }
 
-  // Event-time resolution (drives replay + live when events are flowing).
-  _resolve(force = false) {
-    this._pruneSpikes();
     const still = [];
     for (const pg of this.pendingGoals) {
       const match = this._nearestSpike(pg.eventTs);
       if (match) {
         this._fire(pg, match);
       } else if (force || (this.lastEventTs - pg.eventTs) >= GRACE_MS) {
-        this._fire(pg, null);
+        this._fire(pg, null); // no spike — LOW confidence, score-only
       } else {
-        still.push(pg);
-      }
-    }
-    this.pendingGoals = still;
-  }
-
-  // Wall-clock resolution safety net: fires goals that have waited past GRACE in
-  // real time even if no further stream events arrived to advance event time.
-  _resolveWallClock() {
-    if (!this.pendingGoals.length) return;
-    this._pruneSpikes();
-    const now = Date.now();
-    const still = [];
-    for (const pg of this.pendingGoals) {
-      const match = this._nearestSpike(pg.eventTs);
-      if (match) {
-        this._fire(pg, match);
-      } else if ((now - (pg.wallSeen || now)) >= GRACE_MS) {
-        this._fire(pg, null);
-      } else {
-        still.push(pg);
+        still.push(pg); // keep waiting for a possible spike
       }
     }
     this.pendingGoals = still;
@@ -171,12 +141,9 @@ class GoalDetector extends EventEmitter {
     return best;
   }
 
+  // Fire any goals still pending (match end / end of replay).
   flush() {
     this._resolve(true);
-  }
-
-  stop() {
-    if (this._autoResolve) { clearInterval(this._autoResolve); this._autoResolve = null; }
   }
 
   _fire(pa, spikeEntry) {
@@ -189,6 +156,9 @@ class GoalDetector extends EventEmitter {
     const scoreDisplay = pa.homeGoalsAtDetection + ' - ' + pa.awayGoalsAtDetection;
     const spike = spikeEntry ? spikeEntry.spike : null;
 
+    // Unique, monotonic wallTs — this is the ledger key. If two detections fire in
+    // the same millisecond (fast replay), a plain Date.now() would collide and
+    // verification results would patch the wrong record.
     let wallTs = Date.now();
     if (wallTs <= this._lastWallTs) wallTs = this._lastWallTs + 1;
     this._lastWallTs = wallTs;
@@ -209,11 +179,12 @@ class GoalDetector extends EventEmitter {
       wallTs: wallTs,
       eventTs: pa.eventTs,
       spikeMagnitude: spike ? spike.magnitude : 0,
-      spikeRatio: spike ? spike.ratio : 0,
+      spikeRatio: spike ? spike.ratio : '0.00',
       baseline: spike ? spike.baseline : 0,
       marketType: spikeEntry ? spikeEntry.marketType : 'SCORE_ONLY',
       confidence: this._confidence(spike),
       currentStats: event.Stats || {},
+      // Verifier decides verified vs false-positive after watching for the stat increment.
       fpReason: null,
       status: 'pending'
     };
@@ -227,6 +198,7 @@ class GoalDetector extends EventEmitter {
       market: detection.marketType
     });
 
+    // Consume the matched spike so it can't double-fire another goal.
     if (spikeEntry) {
       this.recentSpikes = this.recentSpikes.filter(s => s !== spikeEntry);
     }
@@ -235,9 +207,8 @@ class GoalDetector extends EventEmitter {
 
   _confidence(spike) {
     if (!spike) return 'LOW';
-    const ratio = Number(spike.ratio);
-    if (ratio >= 10 && spike.magnitude >= 5000) return 'HIGH';
-    if (ratio >= 5 && spike.magnitude >= 2000) return 'MEDIUM';
+    if (spike.ratio >= 10 && spike.magnitude >= 5000) return 'HIGH';
+    if (spike.ratio >= 5  && spike.magnitude >= 2000) return 'MEDIUM';
     return 'LOW';
   }
 }
