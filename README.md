@@ -22,6 +22,7 @@
 - [Running Locally](#running-locally)
 - [Engineering & Reliability](#engineering--reliability)
 - [Validation](#validation)
+- [Known Limitations](#known-limitations)
 - [API Feedback](#feedback-on-txline-api)
 
 ---
@@ -94,7 +95,7 @@ kaching-tell does something fundamentally different:
 
 - It combines **two independent feeds** — score and odds — as a cross-validation system
 - It uses **SSE real-time streams** as primary delivery, with polling backup every 10 seconds
-- It identifies **which team scored** from which stat key increments (`1001` = home, `1002` = away) — the official ground truth — rather than the goal event's `Participant` field, which proved unreliable
+- It identifies **which team scored** from the official `Score` object (`Score.Participant1/2.Total.Goals`) — the ground truth — rather than the goal event's `Participant` field, which proved unreliable
 - It tracks the **running score** throughout each match from those same stat keys, and the score never goes backwards
 - It writes a **tamper-proof on-chain receipt** for every detection at the moment it fires — not after confirmation
 - It builds a **verifiable calibration ledger** — a public performance record with blockchain proof for every entry
@@ -162,7 +163,7 @@ TxLINE Score Feed
          |
          |-->  Solana Anchor (memo transaction, mainnet)
          |
-         |--> Verifier (FIFO match to stat[1001]/[1002] increment, adaptive lag window)
+         |--> Verifier (FIFO match to Score.Total.Goals increment, adaptive lag window)
          |         |
          |         +--> VERIFIED (with scorer + progressive score) or FALSE POSITIVE + reason
          |
@@ -199,8 +200,9 @@ The agent connects to SSE streams as the primary delivery mechanism for instant 
 |---|---|
 | `Action` | Event type -- `goal`, `shot`, `high_danger_possession`, `game_finalised` |
 | `Participant` | Which team acted -- `1` = home, `2` = away (used as a hint only; scorer is confirmed from the stat keys) |
-| `Stats["1001"]` | Home team goals (running total) |
-| `Stats["1002"]` | Away team goals (running total) |
+| `Score.Participant1.Total.Goals` | Home team goals (running total) |
+| `Score.Participant2.Total.Goals` | Away team goals (running total) |
+| `Stats["1"]` / `Stats["2"]` | Flat home/away goal totals (fallback source) |
 | `Clock.Seconds` | Match clock in seconds |
 | `Data.GoalType` | Goal method -- `Shot`, `Penalty`, `OwnGoal` |
 | `Data.PlayerId` | Player who scored (when available) |
@@ -255,7 +257,7 @@ kaching-tell was hardened against the messy realities of a live sports feed. The
 
 **Clock handling that never drops a real goal.** A clock-sanity filter guards against the known second-half batch-reconstruction issue (where the wall clock runs far ahead of the match clock). It normalises millisecond / second / ISO timestamps and *fails open* — if it cannot compute a meaningful drift it lets the event through, and it never discards a `goal` or `game_finalised` event. Only events whose wall clock is implausibly far ahead of the match clock are rejected.
 
-**Verification that survives real confirmation delays.** TxLINE fires `action=goal` with empty Stats (`{}`); the confirming stat increment arrives as a *separate* event — about 54 seconds later on the live stream, but 20+ minutes later on the historical batch feed. The verifier tracks the official score as a running total and matches each goal to the next stat-key increment (`1001` home / `1002` away) oldest-first, inside an **adaptive lag window** that starts generous and tightens toward the live lag. This absorbs slow confirmations without mislabeling real goals, while a VAR/disallowed goal that never receives an increment correctly ages out to a false positive.
+**Verification that survives real confirmation delays.** The goal count is read from the official `Score` object (`Score.Participant1/2.Total.Goals`), with the flat `Stats['1']`/`Stats['2']` totals as a fallback. The confirming score may ride on the goal event itself or on a later event. The verifier tracks the official total and matches each goal to the next increment oldest-first, inside an **adaptive lag window** that starts generous and tightens toward the live lag. This absorbs slow confirmations without mislabeling real goals, while a VAR/disallowed goal that never receives an increment correctly ages out to a false positive.
 
 **Accurate scores and scorers.** The scoring side is taken from *which* stat key increments — the official ground truth — rather than the goal event's `Participant` field, which is not always reliable. Scores update from every event, never go backwards, and each detection shows its true progressive score (e.g. 0-1, 1-1, … 4-6).
 
@@ -288,11 +290,25 @@ Anchoring writes a Solana mainnet memo transaction per detection, independently 
 
 ---
 
+## Known Limitations
+
+Honesty matters more than a clean scoreboard, so these are documented openly.
+
+**Feed field mapping (fixed).** Early builds read the goal count from `Stats['1001']`/`['1002']`, assuming those were home/away goal totals. On the live feed they are period/stat-type slots that remain `0` for the whole match. The result during live matches was that goals were *detected* but never *verified* — every row showed `0 - 0` and eventually a false positive, because the score the agent read never advanced. This is now fixed by reading the `Score` object (`Score.ParticipantN.Total.Goals`) with the flat `Stats['1']`/`Stats['2']` totals as a fallback, validated against captured live payloads.
+
+**Duplicate detections (open).** Around a VAR-reviewed goal, the live feed re-emitted goal-related signals (`goal`, `var`, `var_end`, `action_amend`). The agent fired more than one detection for a single goal. With the score fix, the first detection verifies correctly; the extra rows currently age out as false positives. Robust de-duplication by resulting score is planned and needs a live goal-action stream to tune safely.
+
+**Anchoring confirmation (fixed).** Anchoring used `sendAndConfirmTransaction`, which confirms via the WebSocket `signatureSubscribe` method. Some RPC providers (including Alchemy) do not support it, so transactions landed on-chain but appeared unconfirmed and the dashboard sat on "anchoring…". Anchoring now submits and confirms over HTTP (`getSignatureStatuses`), which works across providers.
+
+**Validation cadence.** World Cup fixtures are infrequent, so opportunities to validate against a live match are limited. The fixes above are verified against real captured feed payloads and an end-to-end simulator that mirrors the true feed shape, rather than a fresh live match.
+
+---
+
 ## Feedback On TxLINE API
 
 **What worked well:**
 
-The normalised schema across all competitions is genuinely impressive. Being able to write one detection engine that works across all 104 World Cup fixtures without any per-competition configuration is a significant engineering advantage. The `SuperOddsType` field made market filtering clean and deterministic. The `Stats['1001']` / `Stats['1002']` running totals gave us a reliable ground-truth signal for both the score and which side scored.
+The normalised schema across all competitions is genuinely impressive. Being able to write one detection engine that works across all 104 World Cup fixtures without any per-competition configuration is a significant engineering advantage. The `SuperOddsType` field made market filtering clean and deterministic. The `Score` object (`Participant1/2.Total.Goals`) gave us a reliable ground-truth signal for both the score and which side scored.
 
 The SSE streams (`/api/scores/stream` and `/api/odds/stream`) delivered 140+ events per minute in real time once connected. Sub-second latency. This is the right architecture for production sports data.
 
@@ -300,9 +316,9 @@ The SSE streams (`/api/scores/stream` and `/api/odds/stream`) delivered 140+ eve
 
 The SSE streams require a custom fetch override to pass Authorization headers when using the eventsource npm package v4. Standard header passing does not work -- the connection succeeds but returns 401. The fix is passing headers via a custom fetch function. Worth documenting explicitly for Node.js builders.
 
-The `Participant` field on `action=goal` events was not always reliable for identifying the scoring team, so we confirm the scoring side from *which* stat key increments (`1001` home, `1002` away) rather than trusting `Participant` directly. Worth flagging for anyone building scorer attribution.
+The `Participant` field on `action=goal` events was not always reliable for identifying the scoring team, so we confirm the scoring side from which team's `Score.Total.Goals` increments rather than trusting `Participant` directly. Worth flagging for anyone building scorer attribution.
 
-The goal action itself fires with empty Stats (`{}`). The actual stat update (`Stats['1001']` incrementing) arrives as a completely separate score event ~54 seconds later on the live stream. Any system that reads goal confirmation from the Stats field of the goal action itself will always see 0 — the increment must be listened for as a separate incoming event.
+Important gotcha: the goal count lives in the `Score` object, **not** the flat `Stats` map. `Stats['1001']`/`['1002']` are period + stat-type slots (first-half stat slots) and stay `0` all match even in a 1-0 result — they are not home/away goal totals. Read `Score.ParticipantN.Total.Goals` (or the flat `Stats['1']`/`Stats['2']` totals). Any system that reads goals from `Stats['1001']`/`['1002']` will always see 0.
 
 The historical batch endpoint (`/api/scores/updates/{epochDay}/{hourOfDay}/{interval}`) has a known second-half data reconstruction issue. Match clock values jump backwards in second-half batches and stat updates arrive with 20+ minute delays on some fixtures. The live SSE stream does not have this issue -- it is specific to the batch reconstruction pipeline, and our verifier's adaptive confirmation window is what absorbs those delayed increments without mislabeling real goals.
 
