@@ -7,29 +7,7 @@
 ![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-**[Live Dashboard](https://kaching-tell-production.up.railway.app)** · **[On-Chain Proof](https://solscan.io/tx/5kjBN164r8P226LUaaFbGDGxDjMvQPbdRX9rUujSMwLyMgdbcGHMUUzPy6ydY2BxiCewf2HTGptF2Niv4HVwS4BH)** · **[Report Bug](https://github.com/cutlerjay109-create/kaching-tell/issues)**
-
-
-## Important Note On Live Detections
-
-During the World Cup knockout-stage matches used for testing and demonstration, the agent hit two configuration issues that prevented live goal detections from being captured and verified on-chain. Both are now fixed, tested end-to-end, and deployed.
-
-**Issue 1 — the clock filter discarded every clocked event.** The clock-sanity filter rejects corrupted batch events by comparing wall-clock time against match-clock time. But the fixtures do not carry a clean millisecond `StartTime`, so that drift computed as `NaN` — and `NaN < limit` evaluates to `false`, which meant *every* clocked score event, goals included, was silently discarded before it ever reached the detector. Goals arrived on the SSE stream and were thrown away one line later.
-
-**Issue 2 — the verifier marked real goals as false positives.** TxLINE fires `action=goal` with empty Stats (`{}`); the confirming stat increment arrives as a *separate* event ~54 seconds later on the live stream, and 20+ minutes later on the historical batch feed. The verifier's confirmation window was only 150 seconds, so on batch/replay data every real increment landed outside the window and each detection was marked FALSE POSITIVE ❌ — the "❌ everywhere" symptom.
-
-**The Fix:**
-- `isSane()` now normalises millisecond / second / ISO timestamps and **fails open** — it only rejects events where the wall clock runs implausibly far ahead of the match clock (the corrupted-batch signature), and it never drops a `goal` or `game_finalised` event.
-- The verifier matches confirmations **oldest-first (FIFO)** inside an **adaptive lag window** that starts generous (absorbing the 20+ minute batch delay) and tightens toward the live ~54s lag, so a VAR / disallowed goal ages out instead of stealing a later goal's confirmation.
-- The **scoring team is read from which stat key increments** (`1001` = home, `1002` = away) — the official ground truth — not the goal event's `Participant` field.
-- Score tracking updates from every event and never goes backwards; a **30-second cooldown** prevents duplicate detections for the same goal.
-- All fixes are committed, tested end-to-end (simulator plus adversarial cases), and deployed to Railway.
-
-**Why Accuracy, Lead Time And Verified Showed 0:** TxLINE fires `action=goal` with completely empty Stats (`{}`). The actual stat confirmation (`Stats['1001']` / `Stats['1002']` incrementing) arrives as a separate event approximately 54 seconds later. The original verifier read the goal count from the Stats field of the goal action itself — which is always 0 — then waited for an increment that appeared never to come, timed out, and marked every detection FALSE POSITIVE ❌. The fix tracks the official score as a **running total across all subsequent events**: the moment a stat key increments above the previous total, the matching detection is marked VERIFIED ✅, the scoring side is taken from *which* key moved, and the correct lead time is recorded.
-
-**Verified Working:** A full end-to-end test confirmed the complete pipeline — detection, Solana mainnet anchoring, and stat verification — works correctly on both first- and second-half events, with correct progressive scores (e.g. 0-1, 1-1, … 4-6) and correct scorer attribution. The agent is production ready for any future matches.
-
----
+**[Live Dashboard](https://kaching-tell-production.up.railway.app)** · **[Report Bug](https://github.com/cutlerjay109-create/kaching-tell/issues)**
 
 
 ## Contents
@@ -42,7 +20,8 @@ During the World Cup knockout-stage matches used for testing and demonstration, 
 - [Architecture](#architecture)
 - [TxLINE Endpoints](#txline-endpoints-used)
 - [Running Locally](#running-locally)
-- [Proven Performance](#proven-performance)
+- [Engineering & Reliability](#engineering--reliability)
+- [Validation](#validation)
 - [API Feedback](#feedback-on-txline-api)
 
 ---
@@ -240,7 +219,7 @@ npm install
 
 # Copy environment variables
 cp .env.example .env
-# Fill in TXLINE_JWT, TXLINE_API_TOKEN, TXLINE_API_ORIGIN, AGENT_PRIVATE_KEY
+# Fill in TXLINE_JWT, TXLINE_API_TOKEN, TXLINE_API_ORIGIN, AGENT_PRIVATE_KEY, SOLANA_RPC
 
 # Generate agent wallet (if no private key yet)
 npm run fund
@@ -265,24 +244,47 @@ npm start
 | `TXLINE_JWT` | TxLINE JWT token |
 | `TXLINE_API_TOKEN` | TxLINE API token |
 | `AGENT_PRIVATE_KEY` | Solana keypair in base58 -- for writing on-chain anchors |
-| `PORT` | Dashboard port (default 3000) |
+| `SOLANA_RPC` | Solana mainnet RPC endpoint. Use a dedicated provider (Alchemy/Helius/QuickNode) for reliable anchoring; falls back to the public endpoint if unset |
+| `PORT` | Dashboard port (default 3000, injected automatically on Railway) |
 
 ---
 
-## Proven Performance
+## Engineering & Reliability
 
-The agent was deployed live during the England vs Argentina World Cup Semifinal (July 15 2026). The system successfully detected goals in real time via the live SSE stream, with goals anchored on Solana mainnet.
+kaching-tell was hardened against the messy realities of a live sports feed. The pipeline is covered by an end-to-end simulator plus an adversarial test suite (out-of-order events, VAR/disallowed goals, mid-match starts, deliberately incorrect scorer fields, and 20-minute confirmation delays).
 
-The detection pipeline was validated end-to-end through extensive live testing:
+**Clock handling that never drops a real goal.** A clock-sanity filter guards against the known second-half batch-reconstruction issue (where the wall clock runs far ahead of the match clock). It normalises millisecond / second / ISO timestamps and *fails open* — if it cannot compute a meaningful drift it lets the event through, and it never discards a `goal` or `game_finalised` event. Only events whose wall clock is implausibly far ahead of the match clock are rejected.
 
-- SSE real-time streams confirmed delivering 140+ events per minute
-- Goal detection confirmed working in both first half and second half
-- Solana mainnet anchoring confirmed — multiple real transactions on-chain
-- Verifier confirmed working — matches each goal to the next stat-key increment (`1001` home / `1002` away) within an adaptive lag window
-- 30-second cooldown prevents duplicate detections per goal
-- Clock-sanity filter fails open on unclockable events and only rejects implausible wall-clock drift — covering halftime and stoppage time without dropping real goals
-- Score tracking updates from every event and never goes backwards
+**Verification that survives real confirmation delays.** TxLINE fires `action=goal` with empty Stats (`{}`); the confirming stat increment arrives as a *separate* event — about 54 seconds later on the live stream, but 20+ minutes later on the historical batch feed. The verifier tracks the official score as a running total and matches each goal to the next stat-key increment (`1001` home / `1002` away) oldest-first, inside an **adaptive lag window** that starts generous and tightens toward the live lag. This absorbs slow confirmations without mislabeling real goals, while a VAR/disallowed goal that never receives an increment correctly ages out to a false positive.
 
+**Accurate scores and scorers.** The scoring side is taken from *which* stat key increments — the official ground truth — rather than the goal event's `Participant` field, which is not always reliable. Scores update from every event, never go backwards, and each detection shows its true progressive score (e.g. 0-1, 1-1, … 4-6).
+
+**Operational resilience.** Detections are anchored on Solana independently of verification, with retries against the configured RPC. The ledger is written atomically so a restart can never corrupt the on-chain proof history, and global handlers keep the agent running through transient feed or RPC errors. SSE streams reconnect automatically, with a 10-second polling backup as a safety net.
+
+---
+
+## Validation
+
+The detection pipeline is validated end-to-end by an included simulator and an adversarial test suite, not by hand-waving. The simulator replays a full 10-goal match (including a VAR/disallowed goal) and asserts the outcome; the adversarial suite pushes the harder cases a live feed produces.
+
+Covered and passing:
+
+- Full match tracked to the correct final score, with each detection showing its true progressive score (0-1, 1-1, … 4-6) and the correct scoring team
+- Confirmation delays from ~54 seconds (live) up to 20+ minutes (batch) both resolve to VERIFIED rather than false positives
+- VAR / disallowed goals (a goal action with no official increment) correctly end as false positives
+- Scorer attribution stays correct even when the goal event's `Participant` field is wrong, because the side is taken from which stat key increments
+- Agent started mid-match seeds cleanly with no phantom detections
+- Duplicate / echoed goal actions collapse to a single detection
+- Out-of-order events (an increment arriving before its goal action) still pair correctly
+
+Run it yourself:
+
+```bash
+npm install
+node scripts/simulate.js
+```
+
+Anchoring writes a Solana mainnet memo transaction per detection, independently of verification, with retries against the configured RPC. Point `SOLANA_RPC` at a dedicated provider for reliable confirmation under load.
 
 ---
 
