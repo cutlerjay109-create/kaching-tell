@@ -7,7 +7,7 @@ module.exports = {
   MIN_SPIKE_DELTA: 500,
   POLL_INTERVAL: 10000,
   PORT: process.env.PORT || 3000,
-  SOLANA_RPC: 'https://api.mainnet-beta.solana.com',
+  SOLANA_RPC: process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com',
   LEDGER_FILE: './data/ledger.json',
   MARKET_TYPES: [
     'OVERUNDER_PARTICIPANT_GOALS',

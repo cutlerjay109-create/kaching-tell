@@ -20,6 +20,12 @@ const client = axios.create({
 
 // Optional: pass fixture ID as argument e.g. node scripts/replay.js 17926687
 const TARGET_FIXTURE_ID = process.argv[2] ? parseInt(process.argv[2]) : null;
+// For matches that have rolled off the live snapshot, pass the real kickoff time
+// (ISO) so we fetch the correct historical time buckets, plus optional team names:
+//   node scripts/replay.js <fixtureId> <ISO_kickoff> <HomeName> <AwayName>
+const TARGET_START = process.argv[3] || null;
+const TARGET_HOME = process.argv[4] || 'Home';
+const TARGET_AWAY = process.argv[5] || 'Away';
 
 async function safeFetch(url) {
   try { return (await client.get(url)).data || []; } catch(e) { return []; }
@@ -147,7 +153,10 @@ async function replayFixture(fixture) {
     }
   });
 
-  // Pass 1: feed all events through detector
+  // Single chronological pass — feed score events to BOTH detector and verifier,
+  // exactly like the live agent does. This keeps the verifier's running score in
+  // sync so each goal is matched to its OWN stat increment (the two-pass approach
+  // watched every detection at 0-0 and mis-verified).
   const allEvents = [
     ...scores.map(s => ({ ...s, _type: 'score' })),
     ...odds.map(o => ({ ...o, _type: 'odds' }))
@@ -161,21 +170,16 @@ async function replayFixture(fixture) {
   for (const event of allEvents) {
     if (event._type === 'score') {
       detector.onScoreEvent(event);
+      verifier.onScoreEvent(event);
     } else {
       detector.onOddsEvent(event);
     }
   }
-
-  // Wait for all detections to fire
-  await new Promise(r => setTimeout(r, 8000));
-
-  // Pass 2: feed score events again so verifier can confirm
-  console.log('⏳  Waiting for official stat confirmation...');
-  for (const event of allEvents) {
-    if (event._type === 'score') {
-      verifier.onScoreEvent(event);
-    }
-  }
+  // Fire any goals still waiting on a spike, then mark any detection that never
+  // matched a stat increment as a false positive (VAR/disallowed).
+  detector.flush();
+  verifier.finalize();
+  console.log('⏳  Finalising verifications and on-chain anchors...');
 
   // Wait for Solana transactions and verifications
   await new Promise(r => setTimeout(r, 15000));
@@ -211,8 +215,11 @@ async function main() {
     // Use specified fixture
     fixture = wc.find(f => f.FixtureId === TARGET_FIXTURE_ID);
     if (!fixture) {
-      // Try with hardcoded known fixture
-      fixture = { FixtureId: TARGET_FIXTURE_ID, Participant1: 'Home Side', Participant2: 'Away Side', StartTime: Date.now() - 7200000 };
+      // Not in the live snapshot (older match). Use provided kickoff + names so we
+      // fetch the correct historical buckets instead of guessing "2 hours ago".
+      const start = TARGET_START ? Date.parse(TARGET_START) : (Date.now() - 7200000);
+      fixture = { FixtureId: TARGET_FIXTURE_ID, Participant1: TARGET_HOME, Participant2: TARGET_AWAY, StartTime: start };
+      logger.warn('replay', 'Fixture not in snapshot — using provided start/names', { start: new Date(start).toISOString() });
       logger.warn('replay', 'Fixture not in current snapshot — using provided ID with generic names');
     }
   } else if (wc.length > 0) {

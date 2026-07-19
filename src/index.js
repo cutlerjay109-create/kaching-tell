@@ -97,7 +97,12 @@ async function main() {
       status: result.status,
       leadTimeMs: result.leadTimeMs,
       confirmedScoringTeam: result.confirmedScoringTeam,
-      confirmedScore: result.confirmedScore
+      confirmedScore: result.confirmedScore,
+      // Correct the displayed score to the confirmed post-goal score.
+      // Without this the dashboard stays stuck on the pre-goal score forever.
+      scoreAtDetection: result.confirmedScore || undefined,
+      scoringTeam: result.confirmedScoringTeam || undefined,
+      fpReason: result.fpReason || undefined
     });
     logger.info('main', 'Verification: ' + result.status, {
       fixtureId: result.fixtureId,

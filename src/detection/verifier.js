@@ -1,115 +1,130 @@
 const { EventEmitter } = require('events');
 const { VERIFICATION_TIMEOUT } = require('../config/constants');
+const { parseScore } = require('../utils/score');
 const logger = require('../utils/logger');
 
+// Official stat confirmations arrive ~54s after the goal action. Cap the pairing
+// window so an orphan VAR/disallowed goal action can't "steal" a later real goal's
+// increment. Anything older than this with no increment is a false positive.
+const MAX_LAG_MS = 150000;
+
+// Verifies detections against the official stat feed.
+//
+// Model: goal actions and stat increments arrive in the SAME order. The Nth goal
+// action is confirmed by the Nth stat increment (FIFO). The scoring side is read
+// from WHICH stat key increments on that event - not from the goal action's
+// Participant field (which was unreliable). Detections that never get a matching
+// increment are false positives (VAR/disallowed goals).
 class Verifier extends EventEmitter {
   constructor() {
     super();
-    this.pending = new Map();
-    this.currentGoals = new Map(); // fixtureId -> { total, home, away }
+    this.pendingByFixture = new Map(); // fixtureId -> [entry] ordered by goalEventTs
+    this.confirmed = new Map();        // fixtureId -> { home, away } last confirmed stat values
   }
 
   seedBaseline(fixtureId, totalGoals, homeGoals, awayGoals) {
-    this.currentGoals.set(fixtureId, { total: totalGoals, home: homeGoals, away: awayGoals });
-    logger.info('verifier', 'Baseline seeded', { fixtureId, totalGoals, homeGoals, awayGoals });
+    this.confirmed.set(fixtureId, { home: homeGoals || 0, away: awayGoals || 0 });
+    logger.info('verifier', 'Baseline seeded', { fixtureId, homeGoals, awayGoals });
   }
 
   watch(detection) {
-    const key = detection.fixtureId + ':' + detection.wallTs;
+    const fid = detection.fixtureId;
+    if (!this.pendingByFixture.has(fid)) this.pendingByFixture.set(fid, []);
+    const arr = this.pendingByFixture.get(fid);
 
-    // Get current known goal count for this fixture
-    const current = this.currentGoals.get(detection.fixtureId) || { total: 0, home: 0, away: 0 };
-    const prevGoals = current.total;
-    const prevHome = current.home;
-    const prevAway = current.away;
-
-    const timer = setTimeout(() => {
-      if (this.pending.has(key)) {
-        this.pending.delete(key);
-        logger.warn('verifier', 'Timeout — false positive', { key });
+    const entry = { detection, goalEventTs: detection.eventTs, startedAt: Date.now() };
+    entry.timer = setTimeout(() => {
+      const idx = arr.indexOf(entry);
+      if (idx !== -1) {
+        arr.splice(idx, 1);
+        logger.warn('verifier', 'Timeout - false positive', { fixtureId: fid });
         this.emit('result', {
           ...detection,
           status: 'false_positive',
           leadTimeMs: null,
-          fpReason: detection.fpReason || 'No stat increment within 5 minutes'
+          fpReason: 'No official stat increment within 5 min - likely VAR/disallowed goal'
         });
       }
     }, VERIFICATION_TIMEOUT);
 
-    this.pending.set(key, { detection, prevGoals, prevHome, prevAway, timer, startedAt: Date.now() });
-    logger.info('verifier', 'Watching', { key, prevGoals, prevHome, prevAway });
+    arr.push(entry);
+    arr.sort((a, b) => a.goalEventTs - b.goalEventTs); // keep FIFO by goal time
+    logger.info('verifier', 'Watching', { fixtureId: fid, pending: arr.length });
   }
 
   onScoreEvent(event) {
-    if (!event.Stats || !event.FixtureId) return;
+    if (!event.FixtureId) return;
+    const parsed = parseScore(event);
+    if (!parsed.hasStats) return;
 
-    // Check ALL possible stat keys TxLINE uses
-    const total1 = event.Stats['1'] || 0;
-    const home1001 = event.Stats['1001'] || 0;
-    const away1002 = event.Stats['1002'] || 0;
+    const fid = event.FixtureId;
+    const prev = this.confirmed.get(fid) || { home: 0, away: 0 };
 
-    // Also check if Stats object has any numeric keys with goal data
-    const statKeys = Object.keys(event.Stats);
-    let detectedTotal = total1;
-    let detectedHome = home1001;
-    let detectedAway = away1002;
+    // Never go backwards (guards against corrupted batch events)
+    const newHome = Math.max(parsed.home, prev.home);
+    const newAway = Math.max(parsed.away, prev.away);
+    const dHome = newHome - prev.home;
+    const dAway = newAway - prev.away;
+    if (dHome === 0 && dAway === 0) return;
 
-    // If primary keys are 0, try to find goal data in other stat keys
-    if (detectedTotal === 0 && statKeys.length > 0) {
-      // Try common alternative keys
-      detectedHome = event.Stats['1001'] || event.Stats['101'] || event.Stats['home'] || 0;
-      detectedAway = event.Stats['1002'] || event.Stats['102'] || event.Stats['away'] || 0;
-      detectedTotal = detectedHome + detectedAway;
+    this.confirmed.set(fid, { home: newHome, away: newAway });
+    logger.info('verifier', 'Stat increment', { fixtureId: fid, home: newHome, away: newAway });
+
+    const incTs = event.Ts || Date.now();
+    const arr = this.pendingByFixture.get(fid) || [];
+
+    // Expand into per-goal increments (home first, then away for rare same-event case)
+    const increments = [];
+    for (let i = 0; i < dHome; i++) increments.push('home');
+    for (let i = 0; i < dAway; i++) increments.push('away');
+
+    let runHome = prev.home;
+    let runAway = prev.away;
+    for (const side of increments) {
+      if (side === 'home') runHome++; else runAway++;
+
+      // Confirm the oldest pending detection whose goal happened before this increment
+      const idx = arr.findIndex(e => e.goalEventTs <= incTs && (incTs - e.goalEventTs) <= MAX_LAG_MS);
+      if (idx === -1) break; // increment with no eligible detection waiting - ignore
+      const entry = arr.splice(idx, 1)[0];
+      clearTimeout(entry.timer);
+
+      let leadTimeMs = entry.goalEventTs ? (incTs - entry.goalEventTs) : (Date.now() - entry.startedAt);
+      if (!(leadTimeMs > 0)) leadTimeMs = Date.now() - entry.startedAt;
+
+      const confirmedScoringTeam = side === 'home'
+        ? entry.detection.participant1
+        : entry.detection.participant2;
+      const confirmedScore = runHome + ' - ' + runAway;
+
+      logger.info('verifier', 'VERIFIED', { fixtureId: fid, confirmedScoringTeam, confirmedScore, leadMs: leadTimeMs });
+      this.emit('result', {
+        ...entry.detection,
+        status: 'verified',
+        leadTimeMs,
+        confirmedScoringTeam,
+        confirmedScore,
+        scoreAtDetection: confirmedScore
+      });
     }
+  }
 
-    // Update our running goal tracker
-    const existing = this.currentGoals.get(event.FixtureId) || { total: 0, home: 0, away: 0 };
-
-    // Only update if stats show MORE goals (never go backwards)
-    const newTotal = Math.max(detectedTotal, existing.total);
-    const newHome = Math.max(detectedHome, existing.home);
-    const newAway = Math.max(detectedAway, existing.away);
-
-    if (newTotal > existing.total || newHome > existing.home || newAway > existing.away) {
-      this.currentGoals.set(event.FixtureId, { total: newTotal, home: newHome, away: newAway });
-      logger.info('verifier', 'Score updated', { fixtureId: event.FixtureId, home: newHome, away: newAway, total: newTotal });
-    }
-
-    // Check if any pending detections can be verified
-    this.pending.forEach((entry, key) => {
-      if (entry.detection.fixtureId !== event.FixtureId) return;
-
-      const goalIncremented = newTotal > entry.prevGoals || newHome > entry.prevHome || newAway > entry.prevAway;
-
-      if (goalIncremented) {
+  // Mark any detection that never matched a stat increment as a false positive.
+  // Call at end of a replay; in live, the per-detection timeout handles this.
+  finalize() {
+    for (const [fid, arr] of this.pendingByFixture) {
+      for (const entry of arr) {
         clearTimeout(entry.timer);
-        this.pending.delete(key);
-        const leadTimeMs = Date.now() - entry.startedAt;
-
-        let confirmedScoringTeam = entry.detection.scoringTeam;
-        let confirmedScore = newHome + ' - ' + newAway;
-
-        if (newHome > entry.prevHome) {
-          confirmedScoringTeam = entry.detection.participant1;
-        } else if (newAway > entry.prevAway) {
-          confirmedScoringTeam = entry.detection.participant2;
-        }
-
-        logger.info('verifier', 'VERIFIED', { key, leadTimeMs, confirmedScoringTeam, confirmedScore });
-
+        logger.warn('verifier', 'Unmatched at finalize - false positive', { fixtureId: fid });
         this.emit('result', {
           ...entry.detection,
-          status: 'verified',
-          leadTimeMs,
-          confirmedScoringTeam,
-          confirmedScore,
-          scoreAtDetection: confirmedScore
+          status: 'false_positive',
+          leadTimeMs: null,
+          fpReason: entry.detection.fpReason || 'No official stat increment matched - likely VAR/disallowed goal'
         });
-
-        // Update baseline after verification
-        this.currentGoals.set(event.FixtureId, { total: newTotal, home: newHome, away: newAway });
       }
-    });
+      arr.length = 0;
+    }
   }
 }
 

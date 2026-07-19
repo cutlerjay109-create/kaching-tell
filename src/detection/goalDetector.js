@@ -2,10 +2,15 @@ const { EventEmitter } = require('events');
 const { isSane } = require('./clockSanity');
 const { BaselineCalculator } = require('./baselineCalculator');
 const { SpikeDetector } = require('./spikeDetector');
+const { parseScore } = require('../utils/score');
 const logger = require('../utils/logger');
 
-const GOAL_WINDOW = 15000;
-const COOLDOWN_EVENT_MS = 120000;
+const GOAL_WINDOW = 15000;      // spike must land within 15s of the goal action
+const GRACE_MS = 6000;          // wait up to 6s (event-time) for a spike before firing LOW
+const SPIKE_RETENTION = 30000;  // keep spikes 30s for matching
+// Cooldown only suppresses the SAME goal's repeated/echoed goal actions.
+// 120s was swallowing legitimate second goals; 30s dedups one goal's burst.
+const COOLDOWN_EVENT_MS = 30000;
 
 class GoalDetector extends EventEmitter {
   constructor(fixture) {
@@ -13,11 +18,13 @@ class GoalDetector extends EventEmitter {
     this.fixture = fixture;
     this.baseline = new BaselineCalculator();
     this.spike = new SpikeDetector(this.baseline);
-    this.pendingGoalAction = null;
-    this.lastSpike = null;
+    this.pendingGoals = [];   // queue — NOT a single slot (fixes lost goals in bursts)
+    this.recentSpikes = [];   // buffered spikes with their event time
+    this.lastEventTs = 0;     // max event time seen — drives resolution deterministically
     this.lastDetectionEventTs = 0;
     this.discardedCount = 0;
     this.lastDiscardLog = 0;
+    this._lastWallTs = 0; // ensures every detection gets a unique wallTs (ledger key)
 
     // Score tracking
     this.homeGoals = 0;
@@ -40,18 +47,18 @@ class GoalDetector extends EventEmitter {
       return;
     }
 
-    // Update running score from ALL score events — never go backwards
-    if (event.Stats && Object.keys(event.Stats).length > 0) {
-      const p1Goals = event.Stats['1001'] || 0;
-      const p2Goals = event.Stats['1002'] || 0;
-      // Only update if higher than current (prevents corrupted data going backwards)
-      if (p1Goals > this.homeGoals) this.homeGoals = p1Goals;
-      if (p2Goals > this.awayGoals) this.awayGoals = p2Goals;
+    // Update running score from ALL score events — never go backwards.
+    // Uses the shared parser so detector and verifier read score identically.
+    const parsed = parseScore(event);
+    if (parsed.hasStats) {
+      if (parsed.home > this.homeGoals) this.homeGoals = parsed.home;
+      if (parsed.away > this.awayGoals) this.awayGoals = parsed.away;
     }
 
-    if (event.Action === 'goal') {
-      const eventTs = event.Ts || Date.now();
+    const eventTs = event.Ts || Date.now();
+    if (eventTs > this.lastEventTs) this.lastEventTs = eventTs;
 
+    if (event.Action === 'goal') {
       if (this.lastDetectionEventTs && (eventTs - this.lastDetectionEventTs) < COOLDOWN_EVENT_MS) {
         logger.debug('goalDetector', 'Goal action ignored — cooldown active', {
           fixtureId: event.FixtureId,
@@ -59,85 +66,102 @@ class GoalDetector extends EventEmitter {
         });
         return;
       }
+      // Dedup the same goal's echoed actions immediately on accept.
+      this.lastDetectionEventTs = eventTs;
 
-      // Determine which team scored
-      const scoringParticipant = event.Participant || null;
+      const scoringParticipant = event.Participant;
       const isHomeGoal = scoringParticipant === 1 || scoringParticipant === '1';
       const scoringTeam = isHomeGoal ? this.fixture.Participant1 : this.fixture.Participant2;
       const goalType = (event.Data && event.Data.GoalType) ? event.Data.GoalType : 'Unknown';
 
-      // Determine if this is a real goal or VAR (Stats empty = likely VAR/pre-confirmation)
-      const hasStatConfirmation = event.Stats && Object.keys(event.Stats).length > 0;
-
       logger.info('goalDetector', 'goal action received', {
         fixtureId: event.FixtureId,
         clock: event.Clock ? event.Clock.Seconds : null,
-        scoringTeam,
-        goalType,
-        hasStatConfirmation,
-        eventTs
+        scoringTeam, goalType, eventTs
       });
 
-      this.pendingGoalAction = {
-        event,
-        receivedAt: Date.now(),
-        eventTs,
-        scoringTeam,
-        goalType,
-        isHomeGoal,
-        hasStatConfirmation,
+      this.pendingGoals.push({
+        event, eventTs, scoringTeam, goalType, isHomeGoal,
         homeGoalsAtDetection: this.homeGoals,
         awayGoalsAtDetection: this.awayGoals
-      };
-      this._tryConfirm();
+      });
     }
 
     if (event.Action === 'game_finalised') {
+      this.flush();
       this.emit('matchFinished', this.fixture.FixtureId);
+      return;
     }
+
+    this._resolve();
   }
 
   onOddsEvent(event) {
     if (!event.Prices || event.Prices.length === 0) return;
     this.lastMarketType = event.SuperOddsType;
+    const eventTs = event.Ts || Date.now();
+    if (eventTs > this.lastEventTs) this.lastEventTs = eventTs;
     this.baseline.update(event);
     const spike = this.spike.update(event);
     if (spike) {
-      this.lastSpike = { spike, ts: Date.now(), marketType: event.SuperOddsType };
-      this._tryConfirm();
+      this.recentSpikes.push({ spike, eventTs, marketType: event.SuperOddsType });
     }
+    this._resolve();
   }
 
-  _tryConfirm() {
-    if (!this.pendingGoalAction) return;
-
-    // If we have an odds spike within window — HIGH/MEDIUM confidence
-    // If no odds spike — still fire with LOW confidence after 5 seconds
-    const hasSpike = this.lastSpike && Math.abs(this.pendingGoalAction.receivedAt - this.lastSpike.ts) <= GOAL_WINDOW;
-    const waitedLongEnough = (Date.now() - this.pendingGoalAction.receivedAt) >= 5000;
-
-    if (!hasSpike && !waitedLongEnough) {
-      // Wait up to 5 seconds for an odds spike to confirm
-      setTimeout(() => this._tryConfirm(), 5000);
-      return;
+  // Resolve pending goals by event time: match a spike if one is near, otherwise
+  // fire LOW once the grace window has passed. Never overwrites/loses a goal.
+  _resolve(force = false) {
+    // Prune stale spikes
+    const cutoff = this.lastEventTs - SPIKE_RETENTION;
+    if (this.recentSpikes.length) {
+      this.recentSpikes = this.recentSpikes.filter(s => s.eventTs >= cutoff);
     }
 
-    const pa = this.pendingGoalAction;
-    const event = pa.event;
+    const still = [];
+    for (const pg of this.pendingGoals) {
+      const match = this._nearestSpike(pg.eventTs);
+      if (match) {
+        this._fire(pg, match);
+      } else if (force || (this.lastEventTs - pg.eventTs) >= GRACE_MS) {
+        this._fire(pg, null); // no spike — LOW confidence, score-only
+      } else {
+        still.push(pg); // keep waiting for a possible spike
+      }
+    }
+    this.pendingGoals = still;
+  }
 
-    // Format clock as MM:SS
+  _nearestSpike(goalTs) {
+    let best = null, bestDist = Infinity;
+    for (const s of this.recentSpikes) {
+      const dist = Math.abs(s.eventTs - goalTs);
+      if (dist <= GOAL_WINDOW && dist < bestDist) { best = s; bestDist = dist; }
+    }
+    return best;
+  }
+
+  // Fire any goals still pending (match end / end of replay).
+  flush() {
+    this._resolve(true);
+  }
+
+  _fire(pa, spikeEntry) {
+    const event = pa.event;
     const clockSeconds = event.Clock ? event.Clock.Seconds : 0;
     const clockMins = Math.floor(clockSeconds / 60);
     const clockSecs = clockSeconds % 60;
     const clockFormatted = clockMins + ':' + String(clockSecs).padStart(2, '0');
 
-    // Score at time of detection
-    const homeScore = pa.homeGoalsAtDetection;
-    const awayScore = pa.awayGoalsAtDetection;
-    const scoreDisplay = homeScore + ' - ' + awayScore;
+    const scoreDisplay = pa.homeGoalsAtDetection + ' - ' + pa.awayGoalsAtDetection;
+    const spike = spikeEntry ? spikeEntry.spike : null;
 
-    // False positive reason
-    const fpReason = !pa.hasStatConfirmation ? 'VAR/Pre-confirmation — Stats empty at detection time' : null;
+    // Unique, monotonic wallTs — this is the ledger key. If two detections fire in
+    // the same millisecond (fast replay), a plain Date.now() would collide and
+    // verification results would patch the wrong record.
+    let wallTs = Date.now();
+    if (wallTs <= this._lastWallTs) wallTs = this._lastWallTs + 1;
+    this._lastWallTs = wallTs;
 
     const detection = {
       fixtureId: this.fixture.FixtureId,
@@ -150,17 +174,18 @@ class GoalDetector extends EventEmitter {
       matchClock: clockSeconds,
       matchClockFormatted: clockFormatted,
       scoreAtDetection: scoreDisplay,
-      homeGoals: homeScore,
-      awayGoals: awayScore,
-      wallTs: Date.now(),
+      homeGoals: pa.homeGoalsAtDetection,
+      awayGoals: pa.awayGoalsAtDetection,
+      wallTs: wallTs,
       eventTs: pa.eventTs,
-      spikeMagnitude: this.lastSpike ? this.lastSpike.spike.magnitude : 0,
-      spikeRatio: this.lastSpike ? this.lastSpike.spike.ratio : '0.00',
-      baseline: this.lastSpike ? this.lastSpike.spike.baseline : 0,
-      marketType: this.lastSpike ? this.lastSpike.marketType : 'SCORE_ONLY',
-      confidence: this._confidence(this.lastSpike ? this.lastSpike.spike : null),
+      spikeMagnitude: spike ? spike.magnitude : 0,
+      spikeRatio: spike ? spike.ratio : '0.00',
+      baseline: spike ? spike.baseline : 0,
+      marketType: spikeEntry ? spikeEntry.marketType : 'SCORE_ONLY',
+      confidence: this._confidence(spike),
       currentStats: event.Stats || {},
-      fpReason,
+      // Verifier decides verified vs false-positive after watching for the stat increment.
+      fpReason: null,
       status: 'pending'
     };
 
@@ -173,9 +198,10 @@ class GoalDetector extends EventEmitter {
       market: detection.marketType
     });
 
-    this.lastDetectionEventTs = pa.eventTs;
-    this.pendingGoalAction = null;
-    this.lastSpike = null;
+    // Consume the matched spike so it can't double-fire another goal.
+    if (spikeEntry) {
+      this.recentSpikes = this.recentSpikes.filter(s => s !== spikeEntry);
+    }
     this.emit('detection', detection);
   }
 

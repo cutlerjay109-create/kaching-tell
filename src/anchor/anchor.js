@@ -16,23 +16,34 @@ function getConnection() {
 }
 
 async function anchorDetection(detection, hash) {
-  try {
-    const keypair = getKeypair();
-    const conn = getConnection();
-    const memo = buildMemo(detection, hash);
-    const ix = new TransactionInstruction({
-      keys: [{ pubkey: keypair.publicKey, isSigner: true, isWritable: false }],
-      programId: MEMO_PROGRAM,
-      data: Buffer.from(memo, 'utf8')
-    });
-    const tx = new Transaction().add(ix);
-    const sig = await sendAndConfirmTransaction(conn, tx, [keypair]);
-    logger.info('anchor', 'Anchored', { sig, fixtureId: detection.fixtureId });
-    return sig;
-  } catch (err) {
-    logger.error('anchor', 'Anchor failed', { err: err.message });
-    return null;
+  const keypair = getKeypair();
+  const conn = getConnection();
+  const memo = buildMemo(detection, hash);
+  const ix = new TransactionInstruction({
+    keys: [{ pubkey: keypair.publicKey, isSigner: true, isWritable: false }],
+    programId: MEMO_PROGRAM,
+    data: Buffer.from(memo, 'utf8')
+  });
+
+  // Public mainnet RPC is rate-limited; retry a few times before giving up so
+  // detections don't get stuck showing "anchoring..." forever. Set SOLANA_RPC
+  // to a dedicated endpoint (Helius/QuickNode/Triton) for reliable anchoring.
+  const MAX_ATTEMPTS = 4;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const tx = new Transaction().add(ix);
+      const sig = await sendAndConfirmTransaction(conn, tx, [keypair]);
+      logger.info('anchor', 'Anchored', { sig, fixtureId: detection.fixtureId, attempt });
+      return sig;
+    } catch (err) {
+      logger.error('anchor', 'Anchor attempt failed', { attempt, err: err.message });
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise(r => setTimeout(r, 1500 * attempt));
+      }
+    }
   }
+  logger.error('anchor', 'Anchor failed after retries', { fixtureId: detection.fixtureId });
+  return null;
 }
 
 module.exports = { anchorDetection };

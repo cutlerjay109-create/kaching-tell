@@ -15,7 +15,10 @@ class Store extends EventEmitter {
   updateDetection(wallTs, fixtureId, updates) {
     const record = this.detections.find(d => d.wallTs === wallTs && d.fixtureId === fixtureId);
     if (record) {
-      Object.assign(record, updates);
+      // Never overwrite an existing value with undefined — callers pass optional fields.
+      for (const [k, v] of Object.entries(updates)) {
+        if (v !== undefined) record[k] = v;
+      }
       this.emit('update', record);
     }
   }
