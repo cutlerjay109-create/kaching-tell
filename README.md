@@ -259,7 +259,7 @@ kaching-tell was hardened against the messy realities of a live sports feed. The
 
 **Verification that survives real confirmation delays.** The goal count is read from the official `Score` object (`Score.Participant1/2.Total.Goals`), with the flat `Stats['1']`/`Stats['2']` totals as a fallback. The confirming score may ride on the goal event itself or on a later event. The verifier tracks the official total and matches each goal to the next increment oldest-first, inside an **adaptive lag window** that starts generous and tightens toward the live lag. This absorbs slow confirmations without mislabeling real goals, while a VAR/disallowed goal that never receives an increment correctly ages out to a false positive.
 
-**Accurate scores and scorers.** The scoring side is taken from *which* stat key increments — the official ground truth — rather than the goal event's `Participant` field, which is not always reliable. Scores update from every event, never go backwards, and each detection shows its true progressive score (e.g. 0-1, 1-1, … 4-6).
+**Accurate scores and scorers.** The scoring side is taken from which team's `Score.Total.Goals` increments — the official ground truth — rather than the goal event's `Participant` field, which is not always reliable. Scores update from every event, never go backwards, and each detection shows its true progressive score (e.g. 0-1, 1-1, … 4-6).
 
 **Operational resilience.** Detections are anchored on Solana independently of verification, with retries against the configured RPC. The ledger is written atomically so a restart can never corrupt the on-chain proof history, and global handlers keep the agent running through transient feed or RPC errors. SSE streams reconnect automatically, with a 10-second polling backup as a safety net.
 
@@ -274,17 +274,18 @@ Covered and passing:
 - Full match tracked to the correct final score, with each detection showing its true progressive score (0-1, 1-1, … 4-6) and the correct scoring team
 - Confirmation delays from ~54 seconds (live) up to 20+ minutes (batch) both resolve to VERIFIED rather than false positives
 - VAR / disallowed goals (a goal action with no official increment) correctly end as false positives
-- Scorer attribution stays correct even when the goal event's `Participant` field is wrong, because the side is taken from which stat key increments
+- Scorer attribution stays correct even when the goal event's `Participant` field is wrong, because the side is taken from which team's `Score.Total.Goals` increments
 - Agent started mid-match seeds cleanly with no phantom detections
-- Duplicate / echoed goal actions collapse to a single detection
 - Out-of-order events (an increment arriving before its goal action) still pair correctly
 
-Run it yourself:
+Run it yourself — no credentials or live match required:
 
 ```bash
 npm install
-node scripts/simulate.js
+npm run simulate
 ```
+
+You'll watch a full match verify end-to-end in a couple of seconds: ten detections climbing 0-1 → 4-6, each with the correct scoring team, one VAR goal correctly flagged as a false positive, and a final accuracy summary.
 
 Anchoring writes a Solana mainnet memo transaction per detection, independently of verification, with retries against the configured RPC. Point `SOLANA_RPC` at a dedicated provider for reliable confirmation under load.
 

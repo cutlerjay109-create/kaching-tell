@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/index.js",
+    "simulate": "node scripts/simulate.js",
     "fund": "node scripts/fund-wallet.js",
     "balance": "node scripts/check-balance.js"
   },
