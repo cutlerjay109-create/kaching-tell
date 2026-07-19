@@ -4,3 +4,6 @@ node_modules/
 *.bak
 *.bak2
 .fix-backup-*/
+
+agent.log
+*.log
