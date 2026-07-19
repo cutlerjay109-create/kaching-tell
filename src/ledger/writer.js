@@ -16,7 +16,12 @@ function writeLedger(store) {
       stats: store.getStats(),
       detections: store.getAll()
     };
-    fs.writeFileSync(LEDGER_FILE, JSON.stringify(data, null, 2));
+    // Atomic write: write to a temp file then rename, so a crash mid-write can
+    // never leave a truncated/corrupted ledger.json (which would fail to parse
+    // on restart and lose the on-chain proof history).
+    const tmp = LEDGER_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, LEDGER_FILE);
   } catch (err) {
     logger.error('writer', 'Failed to write ledger', { err: err.message });
   }

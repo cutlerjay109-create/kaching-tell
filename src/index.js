@@ -10,6 +10,16 @@ const { startDashboard } = require('./dashboard/server');
 const logger = require('./utils/logger');
 const axios = require('axios');
 
+// Global safety net: a transient error (a malformed SSE frame, an RPC hiccup)
+// must never crash the agent in the middle of a live match. Log and keep running;
+// Railway will also restart the process if it ever does exit.
+process.on('unhandledRejection', (reason) => {
+  logger.error('main', 'Unhandled rejection (continuing)', { err: reason && reason.message ? reason.message : String(reason) });
+});
+process.on('uncaughtException', (err) => {
+  logger.error('main', 'Uncaught exception (continuing)', { err: err && err.message ? err.message : String(err) });
+});
+
 const store = new Store();
 const verifier = new Verifier();
 const detectors = new Map();
