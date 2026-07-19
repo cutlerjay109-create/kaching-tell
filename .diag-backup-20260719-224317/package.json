@@ -4,7 +4,7 @@
   "description": "Autonomous World Cup goal detector \u2014 detects goals before official confirmation and anchors every detection on Solana",
   "main": "index.js",
   "scripts": {
-    "start": "node scripts/diag.js; node src/index.js",
+    "start": "node src/index.js",
     "fund": "node scripts/fund-wallet.js",
     "balance": "node scripts/check-balance.js"
   },
